@@ -1,0 +1,336 @@
+import { useState, useRef, useEffect } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  FlatList,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
+import { useSession } from "@/state/session";
+import { getCoach } from "@/data/coaches";
+import { ChatBubble, type ChatMessage } from "@/components/ChatBubble";
+import { colors, radius, spacing } from "@/theme/colors";
+
+const initialMessages: Record<string, ChatMessage[]> = {
+  luna: [
+    {
+      id: "1",
+      role: "coach",
+      text: "안녕, 왔구나 🌙 오늘 하루 어떻게 보냈어?",
+      time: "오전 09:12",
+    },
+    {
+      id: "2",
+      role: "coach",
+      text: "무리하진 않았어? 천천히 이야기해줘. 듣고 있을게.",
+      time: "오전 09:12",
+    },
+  ],
+  rex: [
+    {
+      id: "1",
+      role: "coach",
+      text: "왔다. 인사는 됐고, 본론으로.",
+      time: "오전 09:12",
+    },
+    {
+      id: "2",
+      role: "coach",
+      text: "오늘 목표 뭐였지? 했나, 안 했나. 둘 중 하나로 대답해.",
+      time: "오전 09:12",
+    },
+  ],
+  zero: [],
+  nova: [],
+};
+
+export default function ChatScreen() {
+  const router = useRouter();
+  const { selectedCoach } = useSession();
+  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    selectedCoach ? initialMessages[selectedCoach] ?? [] : []
+  );
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    if (selectedCoach) {
+      setMessages(initialMessages[selectedCoach] ?? []);
+    }
+  }, [selectedCoach]);
+
+  if (!selectedCoach) {
+    return <NoCoachState onSelect={() => router.push("/")} />;
+  }
+
+  const coach = getCoach(selectedCoach);
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    Haptics.selectionAsync().catch(() => {});
+    const time = new Date().toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const newMsg: ChatMessage = {
+      id: String(Date.now()),
+      role: "user",
+      text,
+      time,
+    };
+    setMessages((prev) => [...prev, newMsg]);
+    setInput("");
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <ChatHeader coach={coach} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 0}
+      >
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <ChatBubble message={item} coach={coach} />}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={<DayDivider label="오늘" />}
+          showsVerticalScrollIndicator={false}
+        />
+
+        <QuickActions coach={coach} />
+
+        <View style={styles.inputBar}>
+          <Pressable style={styles.iconButton}>
+            <Ionicons name="add" size={22} color={colors.textMuted} />
+          </Pressable>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder={`${coach.name}에게 메시지...`}
+            placeholderTextColor={colors.textDim}
+            style={styles.input}
+            multiline
+            onSubmitEditing={send}
+          />
+          <Pressable
+            onPress={send}
+            disabled={!input.trim()}
+            style={[
+              styles.sendButton,
+              { backgroundColor: input.trim() ? coach.primary : colors.border },
+            ]}
+          >
+            <Ionicons name="arrow-up" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function ChatHeader({ coach }: { coach: ReturnType<typeof getCoach> }) {
+  return (
+    <View style={styles.header}>
+      <View style={[styles.headerAvatar, { backgroundColor: coach.bubbleBg, borderColor: coach.primary }]}>
+        <Text style={{ fontSize: 22 }}>{coach.emoji}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.headerName, { color: coach.primary }]}>{coach.name}</Text>
+        <View style={styles.statusRow}>
+          <View style={[styles.dot, { backgroundColor: colors.success }]} />
+          <Text style={styles.statusText}>{coach.tagline} · 온라인</Text>
+        </View>
+      </View>
+      <Pressable style={styles.iconButton}>
+        <Ionicons name="ellipsis-vertical" size={20} color={colors.textMuted} />
+      </Pressable>
+    </View>
+  );
+}
+
+function DayDivider({ label }: { label: string }) {
+  return (
+    <View style={styles.divider}>
+      <View style={styles.dividerLine} />
+      <Text style={styles.dividerText}>{label}</Text>
+      <View style={styles.dividerLine} />
+    </View>
+  );
+}
+
+function QuickActions({ coach }: { coach: ReturnType<typeof getCoach> }) {
+  const actions: { label: string; color: string }[] = [
+    { label: "GO", color: colors.success },
+    { label: "HOLD", color: colors.warning },
+    { label: "STOP", color: colors.danger },
+  ];
+  return (
+    <View style={styles.quickRow}>
+      {actions.map((a) => (
+        <Pressable
+          key={a.label}
+          style={({ pressed }) => [
+            styles.quickButton,
+            { borderColor: a.color + "66" },
+            pressed && { backgroundColor: a.color + "22" },
+          ]}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})}
+        >
+          <Text style={[styles.quickText, { color: a.color }]}>{a.label}</Text>
+        </Pressable>
+      ))}
+      <Pressable
+        style={({ pressed }) => [
+          styles.quickButton,
+          styles.quickPhoto,
+          { borderColor: coach.primary + "66" },
+          pressed && { backgroundColor: coach.primary + "22" },
+        ]}
+      >
+        <Ionicons name="camera" size={14} color={coach.primary} />
+        <Text style={[styles.quickText, { color: coach.primary }]}>인증</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function NoCoachState({ onSelect }: { onSelect: () => void }) {
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyTitle}>먼저 코치를 선택해줘</Text>
+        <Text style={styles.emptySubtitle}>
+          코치마다 대화 스타일이 달라. 너에게 맞는 한 명을 골라봐.
+        </Text>
+        <Pressable onPress={onSelect} style={styles.emptyButton}>
+          <Text style={styles.emptyButtonText}>코치 선택하기</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.md,
+  },
+  headerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerName: { fontSize: 18, fontWeight: "800", letterSpacing: 1 },
+  statusRow: { flexDirection: "row", alignItems: "center", marginTop: 2, gap: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { color: colors.textMuted, fontSize: 12 },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  list: { paddingVertical: spacing.lg },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.lg,
+    gap: spacing.md,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText: { color: colors.textDim, fontSize: 11, letterSpacing: 1 },
+  quickRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    flexWrap: "wrap",
+  },
+  quickButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    backgroundColor: colors.bgCard,
+  },
+  quickPhoto: { flexDirection: "row", alignItems: "center", gap: 4 },
+  quickText: { fontSize: 13, fontWeight: "700", letterSpacing: 1 },
+  inputBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.bgElevated,
+    gap: spacing.sm,
+  },
+  input: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    maxHeight: 120,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: spacing.sm,
+  },
+  emptySubtitle: {
+    color: colors.textMuted,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.xl,
+  },
+  emptyButton: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+  },
+  emptyButtonText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+});

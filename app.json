@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "GOS",
+    "slug": "gos-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "gos",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gos.app"
+    },
+    "android": {
+      "package": "com.gos.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B12"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
