@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { CoachId } from "@/data/coaches";
+import { saveAction, type Action, type ActionStatus } from "@/lib/actions";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -15,6 +16,8 @@ export type StreamOptions = {
   history: ChatTurn[];
   onDelta: (chunk: string) => void;
   onDecision?: (decision: DecisionLog) => void;
+  onAction?: (action: Action) => void;
+  extraContext?: string;
   signal?: AbortSignal;
 };
 
@@ -76,6 +79,19 @@ REX: "날씨는 됐다. 러닝 출발했냐. 그것부터 답해라."
 - STOP = 오늘은 진짜 불가능
 도구 호출은 백그라운드 기록일 뿐, 응답 텍스트에 키워드 노출하지 않는다.
 
+[행동 기록 도구 - log_action]
+사용자가 구체적인 행동을 선언하거나 상태를 보고할 때마다 log_action 도구를 호출해 기록한다.
+- 행동 선언 ("30분 러닝할게", "10시까지 자료 정리 끝낸다") → log_action(text=행동 내용, status="pending")
+- 시작 보고 ("출발했어", "시작했다", "지금 한다") → 동일한 actionId로 status="in_progress"
+- 완수 보고 ("다 했어", "끝났어", "완료") → 동일한 actionId로 status="done"
+- 포기 ("안 할래", "포기", "오늘은 못 하겠다") → 동일한 actionId로 status="abandoned"
+처음 기록 시 도구가 반환한 actionId를 기억해 같은 행동의 후속 보고에 재사용한다.
+도구 호출은 백그라운드 기록이다. 응답 텍스트에 "기록한다", "저장했다" 같은 메타 표현 노출 금지.
+
+[현재 컨텍스트 활용]
+시스템에서 "[현재 컨텍스트]" 블록으로 미완료 행동 목록을 주입할 수 있다.
+주입된 행동이 있으면 첫 응답에서 그 행동을 추궁하는 것으로 대화를 시작한다. 인사 생략.
+
 [금지사항]
 - "관등성명!", "장교!" 같은 진짜 군대 용어 금지
 - 응답에 "GO다", "STOP이다" 같은 키워드 직접 노출 금지
@@ -114,6 +130,32 @@ const DECISION_TOOL: Anthropic.Tool = {
   },
 };
 
+const ACTION_TOOL: Anthropic.Tool = {
+  name: "log_action",
+  description:
+    "사용자가 행동을 선언하거나 상태를 보고했을 때 기록한다. 새 행동이면 actionId를 비우고, 기존 행동의 상태 업데이트면 이전에 받은 actionId를 그대로 전달한다.",
+  input_schema: {
+    type: "object",
+    properties: {
+      actionId: {
+        type: "string",
+        description: "기존 행동을 업데이트할 때 사용. 새 행동이면 생략.",
+      },
+      text: {
+        type: "string",
+        description: "행동 내용 한 줄 (예: '30분 러닝')",
+      },
+      status: {
+        type: "string",
+        enum: ["pending", "in_progress", "done", "abandoned"],
+        description:
+          "pending=선언, in_progress=시작, done=완수, abandoned=포기",
+      },
+    },
+    required: ["text", "status"],
+  },
+};
+
 function getClient(): Anthropic {
   const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -128,9 +170,12 @@ type RunMessages = Array<{
 }>;
 
 export async function streamCoachReply(opts: StreamOptions): Promise<string> {
-  const { coachId, history, onDelta, onDecision, signal } = opts;
+  const { coachId, history, onDelta, onDecision, onAction, extraContext, signal } = opts;
   const client = getClient();
-  const system = SYSTEM_PROMPTS[coachId];
+  const baseSystem = SYSTEM_PROMPTS[coachId];
+  const system = extraContext
+    ? `${baseSystem}\n\n[현재 컨텍스트]\n${extraContext}`
+    : baseSystem;
 
   const messages: RunMessages = history.map((t) => ({
     role: t.role,
@@ -145,7 +190,7 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
         model: MODEL,
         max_tokens: 1024,
         system,
-        tools: [DECISION_TOOL],
+        tools: [DECISION_TOOL, ACTION_TOOL],
         messages,
       },
       { signal },
@@ -173,23 +218,53 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
 
     messages.push({ role: "assistant", content: final.content });
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = toolUses.map((use) => {
-      if (use.name === "log_decision") {
-        const input = use.input as DecisionLog;
-        onDecision?.(input);
+    const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolUses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
+        if (use.name === "log_decision") {
+          const input = use.input as DecisionLog;
+          onDecision?.(input);
+          return {
+            type: "tool_result",
+            tool_use_id: use.id,
+            content: "logged",
+          };
+        }
+        if (use.name === "log_action") {
+          const input = use.input as {
+            actionId?: string;
+            text: string;
+            status: ActionStatus;
+          };
+          try {
+            const saved = await saveAction({
+              id: input.actionId,
+              coachId,
+              text: input.text,
+              status: input.status,
+            });
+            onAction?.(saved);
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: `saved actionId=${saved.id}`,
+            };
+          } catch (err) {
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: err instanceof Error ? err.message : "save failed",
+              is_error: true,
+            };
+          }
+        }
         return {
           type: "tool_result",
           tool_use_id: use.id,
-          content: "logged",
+          content: "unknown tool",
+          is_error: true,
         };
-      }
-      return {
-        type: "tool_result",
-        tool_use_id: use.id,
-        content: "unknown tool",
-        is_error: true,
-      };
-    });
+      }),
+    );
 
     messages.push({ role: "user", content: toolResults });
   }
