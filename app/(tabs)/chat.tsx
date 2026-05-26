@@ -17,6 +17,7 @@ import { useSession } from "@/state/session";
 import { getCoach } from "@/data/coaches";
 import { ChatBubble, type ChatMessage } from "@/components/ChatBubble";
 import { colors, radius, spacing } from "@/theme/colors";
+import { streamCoachReply, type ChatTurn } from "@/lib/coach";
 
 const initialMessages: Record<string, ChatMessage[]> = {
   luna: [
@@ -59,6 +60,7 @@ export default function ChatScreen() {
     selectedCoach ? initialMessages[selectedCoach] ?? [] : []
   );
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (selectedCoach) {
@@ -72,23 +74,63 @@ export default function ChatScreen() {
 
   const coach = getCoach(selectedCoach);
 
-  const send = () => {
+  const send = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
     Haptics.selectionAsync().catch(() => {});
     const time = new Date().toLocaleTimeString("ko-KR", {
       hour: "2-digit",
       minute: "2-digit",
     });
-    const newMsg: ChatMessage = {
+    const userMsg: ChatMessage = {
       id: String(Date.now()),
       role: "user",
       text,
       time,
     };
-    setMessages((prev) => [...prev, newMsg]);
+    const coachMsgId = String(Date.now() + 1);
+    const coachMsg: ChatMessage = {
+      id: coachMsgId,
+      role: "coach",
+      text: "",
+      time,
+    };
+
+    const baseMessages = [...messages, userMsg];
+    setMessages([...baseMessages, coachMsg]);
     setInput("");
+    setSending(true);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+
+    const history: ChatTurn[] = baseMessages.map((m) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: m.text,
+    }));
+
+    try {
+      await streamCoachReply({
+        coachId: selectedCoach,
+        history,
+        onDelta: (chunk) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === coachMsgId ? { ...m, text: m.text + chunk } : m,
+            ),
+          );
+          listRef.current?.scrollToEnd({ animated: true });
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "응답 중 오류가 발생했어";
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === coachMsgId ? { ...m, text: `⚠️ ${message}` } : m,
+        ),
+      );
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -126,10 +168,13 @@ export default function ChatScreen() {
           />
           <Pressable
             onPress={send}
-            disabled={!input.trim()}
+            disabled={!input.trim() || sending}
             style={[
               styles.sendButton,
-              { backgroundColor: input.trim() ? coach.primary : colors.border },
+              {
+                backgroundColor:
+                  input.trim() && !sending ? coach.primary : colors.border,
+              },
             ]}
           >
             <Ionicons name="arrow-up" size={20} color="#fff" />
