@@ -103,3 +103,23 @@ export async function getPendingActions(coachId: CoachId): Promise<Action[]> {
       (a.status === "pending" || a.status === "in_progress"),
   );
 }
+
+const LAST_NAG_PREFIX = "gos.lastNag.";
+
+export async function getLastNagAt(coachId: CoachId): Promise<number | null> {
+  try {
+    const raw = await AsyncStorage.getItem(`${LAST_NAG_PREFIX}${coachId}`);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setLastNagAt(
+  coachId: CoachId,
+  at: number = Date.now(),
+): Promise<void> {
+  await AsyncStorage.setItem(`${LAST_NAG_PREFIX}${coachId}`, String(at));
+}

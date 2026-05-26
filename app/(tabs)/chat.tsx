@@ -18,6 +18,29 @@ import { getCoach } from "@/data/coaches";
 import { ChatBubble, type ChatMessage } from "@/components/ChatBubble";
 import { colors, radius, spacing } from "@/theme/colors";
 import { streamCoachReply, type ChatTurn } from "@/lib/coach";
+import {
+  getPendingActions,
+  getLastNagAt,
+  setLastNagAt,
+  type Action,
+} from "@/lib/actions";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function relativeDays(ts: number, now: number): string {
+  const days = Math.floor((now - ts) / DAY_MS);
+  if (days <= 0) return "오늘";
+  if (days === 1) return "어제";
+  return `${days}일 전`;
+}
+
+function buildPendingContext(actions: Action[], now: number): string {
+  const lines = actions.map(
+    (a) =>
+      `- "${a.text}" (선언일: ${relativeDays(a.createdAt, now)}, 상태: ${a.status})`,
+  );
+  return `다음 미완료 행동들이 있다:\n${lines.join("\n")}`;
+}
 
 const initialMessages: Record<string, ChatMessage[]> = {
   luna: [
@@ -66,6 +89,78 @@ export default function ChatScreen() {
     if (selectedCoach) {
       setMessages(initialMessages[selectedCoach] ?? []);
     }
+  }, [selectedCoach]);
+
+  useEffect(() => {
+    if (!selectedCoach) return;
+    let cancelled = false;
+    const coachId = selectedCoach;
+
+    (async () => {
+      try {
+        const pending = await getPendingActions(coachId);
+        if (cancelled || pending.length === 0) return;
+
+        const now = Date.now();
+        const lastNagAt = await getLastNagAt(coachId);
+        if (lastNagAt !== null && now - lastNagAt < DAY_MS) return;
+        if (cancelled) return;
+
+        const time = new Date().toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const coachMsgId = `nag_${now}`;
+        const coachMsg: ChatMessage = {
+          id: coachMsgId,
+          role: "coach",
+          text: "",
+          time,
+        };
+        setMessages((prev) => [...prev, coachMsg]);
+        setSending(true);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+
+        try {
+          await streamCoachReply({
+            coachId,
+            history: [{ role: "user", content: "(접속)" }],
+            extraContext: buildPendingContext(pending, now),
+            onDelta: (chunk) => {
+              if (cancelled) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === coachMsgId ? { ...m, text: m.text + chunk } : m,
+                ),
+              );
+              listRef.current?.scrollToEnd({ animated: true });
+            },
+          });
+
+          try {
+            await setLastNagAt(coachId, now);
+          } catch (err) {
+            console.warn("lastNag save failed", err);
+          }
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "응답 중 오류가 발생했어";
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === coachMsgId ? { ...m, text: `⚠️ ${message}` } : m,
+            ),
+          );
+        } finally {
+          if (!cancelled) setSending(false);
+        }
+      } catch (err) {
+        console.warn("auto-nag failed", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedCoach]);
 
   if (!selectedCoach) {
