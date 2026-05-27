@@ -115,8 +115,32 @@ export default function ChatScreen() {
         if (cancelled) return;
         if (saved.length > 0) {
           setMessages(saved.map(toChatMessage));
-        } else {
-          setMessages(initialMessages[coachId] ?? []);
+          return;
+        }
+
+        const greetings = initialMessages[coachId] ?? [];
+        if (greetings.length === 0) {
+          setMessages([]);
+          return;
+        }
+
+        const now = Date.now();
+        const persisted: Message[] = greetings.map((g) => ({
+          id: g.id,
+          coachId,
+          role: "assistant",
+          content: g.text,
+          createdAt: now,
+        }));
+        setMessages(persisted.map(toChatMessage));
+
+        try {
+          for (const m of persisted) {
+            if (cancelled) break;
+            await appendMessage(coachId, m);
+          }
+        } catch (err) {
+          console.warn("greeting persist failed", err);
         }
       } catch (err) {
         console.warn("messages load failed", err);
