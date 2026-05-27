@@ -50,7 +50,34 @@ export function DecisionCard({ decision, onPress }: Props) {
         <Text style={styles.topic} numberOfLines={2}>
           {decision.topic}
         </Text>
-        <Text style={styles.reason}>{decision.reason}</Text>
+
+        {decision.diagnosis && (
+          <View style={styles.clinicalSection}>
+            <Text style={[styles.sectionLabel, { color: accent }]}>
+              ─ 진단 ─
+            </Text>
+            <Text style={styles.diagnosisText}>{decision.diagnosis}</Text>
+          </View>
+        )}
+
+        {decision.prescription && (
+          <View style={styles.clinicalSection}>
+            <Text style={[styles.sectionLabel, { color: accent }]}>
+              ─ 처방 ─
+            </Text>
+            <Text style={styles.prescriptionText}>{decision.prescription}</Text>
+          </View>
+        )}
+
+        <Text
+          style={[
+            styles.reason,
+            (decision.diagnosis || decision.prescription) &&
+              styles.reasonWithClinical,
+          ]}
+        >
+          {decision.reason}
+        </Text>
 
         {decision.card === "GO" && decision.linkedActionId && (
           <View style={[styles.footer, { borderTopColor: accent + "44" }]}>
@@ -112,10 +139,34 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 4,
   },
+  clinicalSection: {
+    marginTop: spacing.sm,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 2,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  diagnosisText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  prescriptionText: {
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 20,
+  },
   reason: {
     color: colors.textMuted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  reasonWithClinical: {
+    marginTop: spacing.sm,
   },
   footer: {
     marginTop: spacing.sm,

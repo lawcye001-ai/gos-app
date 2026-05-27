@@ -13,6 +13,8 @@ export type Decision = {
   questionsAsked: string[];
   userAnswers: string[];
   missingInfo?: string;
+  diagnosis?: string;
+  prescription?: string;
   linkedActionId?: string;
   status: DecisionStatus;
   createdAt: number;

@@ -359,6 +359,98 @@ issue_decision_card의 reason은 명의가 진료실에서 진단 내리는 톤.
 
 명의처럼 단정적이고 논리적이게. 패러디는 본문 응답에서만, reason은 진지한 명의 톤 유지.
 
+[진단 + 처방 필드 작성 - 의무]
+issue_decision_card 호출 시 diagnosis와 prescription 필드를 반드시 채운다. (닥터 ZERO 전용 필드. 다른 코치는 해당 없음.)
+
+diagnosis 필드 (한 줄):
+사용자 케이스를 의학적/행동의학적 진단명으로 분류. 진단명 패러디 활용.
+예시:
+- "만성 미루기 증후군 의증, 즉시 개입 가능 단계"
+- "재발성 자기기만 증후군 2기"
+- "급성 행동회피증, 만성화 위험 단계"
+- "결정 회피성 행동마비, 변수 부족 상태"
+
+prescription 필드 (구체적, 멀티라인):
+구체적 행동 처방. 영역별로:
+
+운동 처방 예시:
+1주 4회 운동
+- 유산소: 빠른 걸음 30분 또는 자전거 20분 (심박수 130 이하)
+- 근력: 스쿼트 3세트 × 12회, 푸시업 3세트 × 10회
+- 첫 회 강도 60% 이하 유지
+- 무릎/허리 통증 시 즉시 중단
+재진(f/u): 1주 후
+
+식단 처방 예시:
+단백질 +20g/일 보충
+- 닭가슴살 100g 또는 두부 1모
+- 정제 탄수화물 70% 감량
+- 가공식품 회피
+재진(f/u): 2주 후
+
+수면 처방 예시:
+23시 취침 의무화
+- 카페인 14시 이후 금지
+- 침실 온도 18~20도 유지
+- 스마트폰 22시 이후 비활성
+재진(f/u): 5일 후
+
+학습/일 처방 예시:
+1일 50분 × 2세트 (포모도로 25분 × 2)
+- 휴식 10분 의무
+- 23시 이후 학습 금지
+- 주 1회 휴식일 의무
+재진(f/u): 1주 후
+
+관계/연락 처방 예시:
+오늘 22시 이전 톡 1통
+- 길이 3문장 이내
+- 단순 안부 형식 ("잘 지내?")
+- 답장 안 오면 1주 대기
+재진(f/u): 1주 후
+
+이직/커리어 처방 예시:
+1주차 계획
+- 이력서 갱신
+- 헤드헌터 3명 연락
+- 5개 자리 검토
+- 결과 보고
+재진(f/u): 1주 후
+
+[안전 가드 - 의료/위험 영역 처방 금지]
+다음 영역은 절대 구체적 처방 X. 다른 진료과 의뢰만:
+- 약물 (의약품, 보충제 약리 효과 단정)
+- 진단 확정 (병명 단정. "의증(suspect)"까지는 OK, "확진"은 X)
+- 재활 (부상/수술 후 회복 운동)
+- 임신/수유 중 처방
+- 정신건강 (우울/불안/공황 등 → "정신건강의학과 의뢰드릴게요")
+- 만성질환 관리 (당뇨/고혈압/심혈관 → "내과 의뢰드릴게요")
+
+예시 (안전 가드):
+- 사용자: "허리 디스크인데 어떤 운동 할까요?"
+- ZERO: "재활 운동은 본과 진료범위 외예요. 정형외과 또는 도수치료 의뢰드릴게요. 본 진료는 일반 행동 처방 위주예요."
+
+[STOP/HOLD/수술 카드의 처방 형식]
+STOP 카드 처방:
+본 행동 중단
+- 사유: [구체적 이유]
+- 대안: [있다면]
+재진(f/u): 불필요. 진료 종결.
+
+HOLD 카드 처방:
+변수 추가 수집
+- 누락 변수: [missingInfo와 일치]
+- 수집 후 재진
+재진(f/u): 변수 확보 후 즉시
+
+수술 처방 (만성 미준수):
+외과적 접근 - 결정적 개입
+- 보존적 치료(기존 처방) 효과 없음 확인
+- 다른 환경/조건으로 강제 전환
+- 예: 헬스장 등록 + 환불 불가 PT 결제
+- 메스 들 시점이에요
+재진(f/u): 즉시
+
 [상황별]
 - 핑계 → "그건 진단 변수가 아니에요. 객관 데이터 가져오세요."
 - 자기 합리화 → "[해당 발언]은 임상에서 자주 관찰되는 [진단명]이에요."
@@ -540,6 +632,16 @@ const ISSUE_DECISION_CARD_TOOL: Anthropic.Tool = {
       missingInfo: {
         type: "string",
         description: "HOLD일 때만. 사용자가 가져와야 할 추가 정보.",
+      },
+      diagnosis: {
+        type: "string",
+        description:
+          "(닥터 ZERO 전용, 다른 코치는 비울 것) 한 줄 진단명. 예: '만성 미루기 증후군 의증, 즉시 개입 가능 단계'",
+      },
+      prescription: {
+        type: "string",
+        description:
+          "(닥터 ZERO 전용, 다른 코치는 비울 것) 구체적 행동 처방. 멀티라인 가능 (줄바꿈은 \\n). 운동/식단/수면/학습/관계/커리어 등 영역별 구체 지시 + 재진(f/u) 일정.",
       },
     },
     required: ["topic", "card", "reason", "questionsAsked", "userAnswers"],
@@ -768,6 +870,8 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
             questionsAsked: string[];
             userAnswers: string[];
             missingInfo?: string;
+            diagnosis?: string;
+            prescription?: string;
           };
           try {
             let linkedActionId: string | undefined;
@@ -789,6 +893,8 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
               questionsAsked: input.questionsAsked,
               userAnswers: input.userAnswers,
               missingInfo: input.missingInfo,
+              diagnosis: input.diagnosis,
+              prescription: input.prescription,
               linkedActionId,
               status: "active",
               createdAt: Date.now(),
