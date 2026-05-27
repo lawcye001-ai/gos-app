@@ -1,6 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { CoachId } from "@/data/coaches";
 import { saveAction, type Action, type ActionStatus } from "@/lib/actions";
+import {
+  appendDecision,
+  generateDecisionId,
+  getActiveDecisions,
+  getDecisions,
+  updateDecision,
+  type Decision,
+  type DecisionCard,
+} from "@/lib/decisions";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -156,6 +165,81 @@ const ACTION_TOOL: Anthropic.Tool = {
   },
 };
 
+const ISSUE_DECISION_CARD_TOOL: Anthropic.Tool = {
+  name: "issue_decision_card",
+  description:
+    "사용자가 결정 묻는 주제에 대해 GO/HOLD/STOP 카드 발급. 질문 충분히 한 뒤 호출할 것.",
+  input_schema: {
+    type: "object",
+    properties: {
+      topic: {
+        type: "string",
+        description: "결정 주제 한 줄 (예: '고백 할지')",
+      },
+      card: {
+        type: "string",
+        enum: ["GO", "HOLD", "STOP"],
+        description:
+          "GO=실행 명령, HOLD=정보 부족으로 판단 보류, STOP=하지 말 것",
+      },
+      reason: {
+        type: "string",
+        description: "코치의 판단 이유 한 줄",
+      },
+      questionsAsked: {
+        type: "array",
+        items: { type: "string" },
+        description: "결정 발급 전 코치가 던진 질문들",
+      },
+      userAnswers: {
+        type: "array",
+        items: { type: "string" },
+        description: "각 질문에 대한 사용자의 답변들",
+      },
+      missingInfo: {
+        type: "string",
+        description: "HOLD일 때만. 사용자가 가져와야 할 추가 정보.",
+      },
+    },
+    required: ["topic", "card", "reason", "questionsAsked", "userAnswers"],
+  },
+};
+
+const GET_ACTIVE_DECISIONS_TOOL: Anthropic.Tool = {
+  name: "get_active_decisions",
+  description:
+    "현재 활성 상태인 결정 카드 조회. HOLD 카드가 있으면 사용자가 후속 정보 가져왔는지 확인 시 사용.",
+  input_schema: {
+    type: "object",
+    properties: {},
+  },
+};
+
+const RESOLVE_DECISION_TOOL: Anthropic.Tool = {
+  name: "resolve_decision",
+  description:
+    "HOLD 카드가 새 정보로 GO/STOP으로 종결될 때, 또는 사용자가 결정 번복할 때 사용.",
+  input_schema: {
+    type: "object",
+    properties: {
+      decisionId: {
+        type: "string",
+        description: "종결할 기존 결정 카드의 id",
+      },
+      newCard: {
+        type: "string",
+        enum: ["GO", "HOLD", "STOP"],
+        description: "새로 발급할 카드",
+      },
+      reason: {
+        type: "string",
+        description: "변경/종결 이유 한 줄",
+      },
+    },
+    required: ["decisionId", "newCard", "reason"],
+  },
+};
+
 function getClient(): Anthropic {
   const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -190,7 +274,13 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
         model: MODEL,
         max_tokens: 1024,
         system,
-        tools: [DECISION_TOOL, ACTION_TOOL],
+        tools: [
+          DECISION_TOOL,
+          ACTION_TOOL,
+          ISSUE_DECISION_CARD_TOOL,
+          GET_ACTIVE_DECISIONS_TOOL,
+          RESOLVE_DECISION_TOOL,
+        ],
         messages,
       },
       { signal },
@@ -253,6 +343,130 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
               type: "tool_result",
               tool_use_id: use.id,
               content: err instanceof Error ? err.message : "save failed",
+              is_error: true,
+            };
+          }
+        }
+        if (use.name === "issue_decision_card") {
+          const input = use.input as {
+            topic: string;
+            card: DecisionCard;
+            reason: string;
+            questionsAsked: string[];
+            userAnswers: string[];
+            missingInfo?: string;
+          };
+          try {
+            let linkedActionId: string | undefined;
+            if (input.card === "GO") {
+              const savedAction = await saveAction({
+                coachId,
+                text: input.topic,
+                status: "pending",
+              });
+              onAction?.(savedAction);
+              linkedActionId = savedAction.id;
+            }
+            const decision: Decision = {
+              id: generateDecisionId(),
+              coachId,
+              topic: input.topic,
+              card: input.card,
+              reason: input.reason,
+              questionsAsked: input.questionsAsked,
+              userAnswers: input.userAnswers,
+              missingInfo: input.missingInfo,
+              linkedActionId,
+              status: "active",
+              createdAt: Date.now(),
+            };
+            await appendDecision(coachId, decision);
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: `issued decisionId=${decision.id}${
+                linkedActionId ? ` linkedActionId=${linkedActionId}` : ""
+              }`,
+            };
+          } catch (err) {
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: err instanceof Error ? err.message : "issue failed",
+              is_error: true,
+            };
+          }
+        }
+        if (use.name === "get_active_decisions") {
+          try {
+            const active = await getActiveDecisions(coachId);
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: JSON.stringify(active),
+            };
+          } catch (err) {
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: err instanceof Error ? err.message : "read failed",
+              is_error: true,
+            };
+          }
+        }
+        if (use.name === "resolve_decision") {
+          const input = use.input as {
+            decisionId: string;
+            newCard: DecisionCard;
+            reason: string;
+          };
+          try {
+            const all = await getDecisions(coachId);
+            const prev = all.find((d) => d.id === input.decisionId);
+            if (!prev) {
+              return {
+                type: "tool_result",
+                tool_use_id: use.id,
+                content: `decisionId=${input.decisionId} not found`,
+                is_error: true,
+              };
+            }
+            await updateDecision(coachId, input.decisionId, {
+              status: "resolved",
+            });
+            let linkedActionId: string | undefined;
+            if (input.newCard === "GO") {
+              const savedAction = await saveAction({
+                coachId,
+                text: prev.topic,
+                status: "pending",
+              });
+              onAction?.(savedAction);
+              linkedActionId = savedAction.id;
+            }
+            const next: Decision = {
+              id: generateDecisionId(),
+              coachId,
+              topic: prev.topic,
+              card: input.newCard,
+              reason: input.reason,
+              questionsAsked: [],
+              userAnswers: [],
+              linkedActionId,
+              status: "active",
+              createdAt: Date.now(),
+            };
+            await appendDecision(coachId, next);
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: `resolved prev=${input.decisionId} new=${next.id}`,
+            };
+          } catch (err) {
+            return {
+              type: "tool_result",
+              tool_use_id: use.id,
+              content: err instanceof Error ? err.message : "resolve failed",
               is_error: true,
             };
           }
