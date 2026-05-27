@@ -1,20 +1,24 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  Pressable,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { getCoach } from "@/data/coaches";
+import { coaches, getCoach, type CoachId } from "@/data/coaches";
 import { useHistory, type HistoryItem } from "@/hooks/useHistory";
 import type { Decision } from "@/lib/decisions";
 import type { Action } from "@/lib/actions";
 import { colors, radius, spacing } from "@/theme/colors";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+type FilterValue = "all" | CoachId;
 
 type HeaderRow = { kind: "header"; id: string; label: string };
 type ListRow = HistoryItem | HeaderRow;
@@ -40,13 +44,19 @@ function formatTime(ts: number): string {
 
 export default function RecordsScreen() {
   const { items, loading } = useHistory();
+  const [filter, setFilter] = useState<FilterValue>("all");
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return items;
+    return items.filter((i) => i.coachId === filter);
+  }, [items, filter]);
 
   const rows = useMemo<ListRow[]>(() => {
-    if (items.length === 0) return [];
+    if (filtered.length === 0) return [];
     const now = Date.now();
     const out: ListRow[] = [];
     let lastLabel: string | null = null;
-    for (const item of items) {
+    for (const item of filtered) {
       const label = dayLabel(item.createdAt, now);
       if (label !== lastLabel) {
         out.push({
@@ -59,7 +69,7 @@ export default function RecordsScreen() {
       out.push(item);
     }
     return out;
-  }, [items]);
+  }, [filtered]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -67,10 +77,14 @@ export default function RecordsScreen() {
         <Text style={styles.headerTitle}>기록</Text>
       </View>
 
+      <FilterRow value={filter} onChange={setFilter} />
+
       {loading && items.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
         </View>
+      ) : rows.length === 0 ? (
+        <EmptyState />
       ) : (
         <FlatList
           data={rows}
@@ -85,6 +99,89 @@ export default function RecordsScreen() {
         />
       )}
     </SafeAreaView>
+  );
+}
+
+function FilterRow({
+  value,
+  onChange,
+}: {
+  value: FilterValue;
+  onChange: (v: FilterValue) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.filterRow}
+    >
+      <FilterChip
+        label="전체"
+        active={value === "all"}
+        activeColor={colors.accent}
+        onPress={() => onChange("all")}
+      />
+      {coaches.map((c) => (
+        <FilterChip
+          key={c.id}
+          label={c.name}
+          active={value === c.id}
+          activeColor={c.primary}
+          onPress={() => onChange(c.id)}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  activeColor,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  activeColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.chip,
+        active
+          ? { backgroundColor: activeColor + "22", borderColor: activeColor }
+          : { borderColor: colors.border },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <Text
+        style={[
+          styles.chipText,
+          { color: active ? activeColor : colors.textMuted },
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function EmptyState() {
+  return (
+    <View style={styles.emptyWrap}>
+      <View style={styles.emptyIcon}>
+        <Ionicons
+          name="document-text-outline"
+          size={32}
+          color={colors.textDim}
+        />
+      </View>
+      <Text style={styles.emptyText}>
+        아직 기록이 없어. 채팅에서 결정이나 행동을 시작해봐.
+      </Text>
+    </View>
   );
 }
 
@@ -205,6 +302,47 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  filterRow: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+    flexDirection: "row",
+  },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    backgroundColor: colors.bgCard,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  emptyWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+    gap: spacing.md,
+  },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
   },
   list: {
     paddingHorizontal: spacing.lg,
