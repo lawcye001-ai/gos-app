@@ -19,6 +19,12 @@ const CARD_LABEL: Record<Decision["card"], string> = {
   STOP: "STOP",
 };
 
+// LLM이 멀티라인 필드에 escaped "\n" 시퀀스(백슬래시+n)를 그대로 넣어 보내는
+// 경우를 위해 실제 newline 문자로 정규화.
+function normalizeLineBreaks(text: string): string {
+  return text.replace(/\\n/g, "\n");
+}
+
 export function DecisionCard({ decision, onPress }: Props) {
   const accent = CARD_COLORS[decision.card];
   const resolved = decision.status !== "active";
@@ -56,7 +62,9 @@ export function DecisionCard({ decision, onPress }: Props) {
             <Text style={[styles.sectionLabel, { color: accent }]}>
               ─ 진단 ─
             </Text>
-            <Text style={styles.diagnosisText}>{decision.diagnosis}</Text>
+            <Text style={styles.diagnosisText}>
+              {normalizeLineBreaks(decision.diagnosis)}
+            </Text>
           </View>
         )}
 
@@ -65,7 +73,9 @@ export function DecisionCard({ decision, onPress }: Props) {
             <Text style={[styles.sectionLabel, { color: accent }]}>
               ─ 처방 ─
             </Text>
-            <Text style={styles.prescriptionText}>{decision.prescription}</Text>
+            <Text style={styles.prescriptionText}>
+              {normalizeLineBreaks(decision.prescription)}
+            </Text>
           </View>
         )}
 
