@@ -1,16 +1,26 @@
 import { View, Text, StyleSheet } from "react-native";
 import type { Coach } from "@/data/coaches";
+import type { Decision } from "@/lib/decisions";
 import { colors, radius, spacing } from "@/theme/colors";
 
-export type ChatMessage = {
+export type TextChatMessage = {
   id: string;
   role: "coach" | "user";
   text: string;
   time: string;
 };
 
+export type DecisionChatMessage = {
+  id: string;
+  role: "decision";
+  decision: Decision;
+  time: string;
+};
+
+export type ChatMessage = TextChatMessage | DecisionChatMessage;
+
 type Props = {
-  message: ChatMessage;
+  message: TextChatMessage;
   coach: Coach;
 };
 

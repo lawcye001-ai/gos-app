@@ -20,6 +20,7 @@ export type StreamOptions = {
   history: ChatTurn[];
   onDelta: (chunk: string) => void;
   onAction?: (action: Action) => void;
+  onDecisionCard?: (decision: Decision) => void;
   extraContext?: string;
   signal?: AbortSignal;
 };
@@ -310,7 +311,7 @@ type RunMessages = Array<{
 }>;
 
 export async function streamCoachReply(opts: StreamOptions): Promise<string> {
-  const { coachId, history, onDelta, onAction, extraContext, signal } = opts;
+  const { coachId, history, onDelta, onAction, onDecisionCard, extraContext, signal } = opts;
   const client = getClient();
   const baseSystem = SYSTEM_PROMPTS[coachId];
   const system = extraContext
@@ -427,6 +428,7 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
               createdAt: Date.now(),
             };
             await appendDecision(coachId, decision);
+            onDecisionCard?.(decision);
             return {
               type: "tool_result",
               tool_use_id: use.id,
@@ -503,6 +505,7 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
               createdAt: Date.now(),
             };
             await appendDecision(coachId, next);
+            onDecisionCard?.(next);
             return {
               type: "tool_result",
               tool_use_id: use.id,

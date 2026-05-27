@@ -15,7 +15,12 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSession } from "@/state/session";
 import { getCoach } from "@/data/coaches";
-import { ChatBubble, type ChatMessage } from "@/components/ChatBubble";
+import {
+  ChatBubble,
+  type ChatMessage,
+  type TextChatMessage,
+} from "@/components/ChatBubble";
+import { DecisionCard } from "@/components/DecisionCard";
 import { colors, radius, spacing } from "@/theme/colors";
 import { streamCoachReply, type ChatTurn } from "@/lib/coach";
 import {
@@ -29,6 +34,7 @@ import {
   appendMessage,
   type Message,
 } from "@/lib/messages";
+import type { Decision } from "@/lib/decisions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -63,7 +69,7 @@ function buildPendingContext(actions: Action[], now: number): string {
   return `다음 미완료 행동들이 있다:\n${lines.join("\n")}`;
 }
 
-const initialMessages: Record<string, ChatMessage[]> = {
+const initialMessages: Record<string, TextChatMessage[]> = {
   luna: [
     {
       id: "1",
@@ -198,10 +204,30 @@ export default function ChatScreen() {
               if (cancelled) return;
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === coachMsgId ? { ...m, text: m.text + chunk } : m,
+                  m.id === coachMsgId
+                    ? m.role === "decision"
+                      ? m
+                      : { ...m, text: m.text + chunk }
+                    : m,
                 ),
               );
               listRef.current?.scrollToEnd({ animated: true });
+            },
+            onDecisionCard: (decision) => {
+              if (cancelled) return;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `dec_${decision.id}`,
+                  role: "decision",
+                  decision,
+                  time: formatTime(Date.now()),
+                },
+              ]);
+              setTimeout(
+                () => listRef.current?.scrollToEnd({ animated: true }),
+                50,
+              );
             },
           });
 
@@ -229,7 +255,9 @@ export default function ChatScreen() {
             err instanceof Error ? err.message : "응답 중 오류가 발생했어";
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === coachMsgId ? { ...m, text: `⚠️ ${message}` } : m,
+              m.id === coachMsgId && m.role !== "decision"
+                ? { ...m, text: `⚠️ ${message}` }
+                : m,
             ),
           );
         } finally {
@@ -305,10 +333,29 @@ export default function ChatScreen() {
           finalText += chunk;
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === coachMsgId ? { ...m, text: m.text + chunk } : m,
+              m.id === coachMsgId
+                ? m.role === "decision"
+                  ? m
+                  : { ...m, text: m.text + chunk }
+                : m,
             ),
           );
           listRef.current?.scrollToEnd({ animated: true });
+        },
+        onDecisionCard: (decision) => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `dec_${decision.id}`,
+              role: "decision",
+              decision,
+              time: formatTime(Date.now()),
+            },
+          ]);
+          setTimeout(
+            () => listRef.current?.scrollToEnd({ animated: true }),
+            50,
+          );
         },
       });
 
@@ -330,7 +377,9 @@ export default function ChatScreen() {
         err instanceof Error ? err.message : "응답 중 오류가 발생했어";
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === coachMsgId ? { ...m, text: `⚠️ ${message}` } : m,
+          m.id === coachMsgId && m.role !== "decision"
+            ? { ...m, text: `⚠️ ${message}` }
+            : m,
         ),
       );
     } finally {
@@ -350,7 +399,13 @@ export default function ChatScreen() {
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <ChatBubble message={item} coach={coach} />}
+          renderItem={({ item }) =>
+            item.role === "decision" ? (
+              <DecisionCard decision={item.decision} />
+            ) : (
+              <ChatBubble message={item} coach={coach} />
+            )
+          }
           contentContainerStyle={styles.list}
           ListHeaderComponent={<DayDivider label="오늘" />}
           showsVerticalScrollIndicator={false}
