@@ -157,13 +157,13 @@ const initialMessages: Record<string, TextChatMessage[]> = {
     {
       id: "1",
       role: "coach",
-      text: "ZERO다. 분석 대기 중임.",
+      text: "닥터 ZERO입니다. 진료 시작하죠.",
       time: "오전 09:12",
     },
     {
       id: "2",
       role: "coach",
-      text: "현재 진행 중인 행동 또는 결정 대상이 있나? 변수 알려줘.",
+      text: "현재 가지고 계신 결정이나 진행 중인 행동 있으시면 알려주세요. 차트에 기입할게요.",
       time: "오전 09:12",
     },
   ],
