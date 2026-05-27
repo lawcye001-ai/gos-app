@@ -37,12 +37,36 @@ import {
 import { getDecisions, type Decision } from "@/lib/decisions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_GAP_MS = 3 * 60 * 60 * 1000;
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("ko-KR", {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function dayStart(ts: number): number {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function formatDeclaredAt(ts: number): string {
+  const d = new Date(ts);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function formatGap(ms: number): string {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `약 ${minutes}분 경과`;
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  if (hours < 24) return `약 ${hours}시간 경과`;
+  const days = Math.round(hours / 24);
+  return `약 ${days}일 경과`;
 }
 
 function toChatMessage(
@@ -69,16 +93,24 @@ function toChatMessage(
 
 function toChatTurns(saved: Message[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
+  let prevTs: number | null = null;
   for (const m of saved) {
-    if (m.role === "user" || m.role === "assistant") {
-      turns.push({ role: m.role, content: m.content });
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const gap = prevTs !== null ? m.createdAt - prevTs : 0;
+    if (gap >= SESSION_GAP_MS) {
+      turns.push({
+        role: "user",
+        content: `[세션 휴지: ${formatGap(gap)}]`,
+      });
     }
+    turns.push({ role: m.role, content: m.content });
+    prevTs = m.createdAt;
   }
   return turns;
 }
 
 function relativeDays(ts: number, now: number): string {
-  const days = Math.floor((now - ts) / DAY_MS);
+  const days = Math.round((dayStart(now) - dayStart(ts)) / DAY_MS);
   if (days <= 0) return "오늘";
   if (days === 1) return "어제";
   return `${days}일 전`;
@@ -87,7 +119,7 @@ function relativeDays(ts: number, now: number): string {
 function buildPendingContext(actions: Action[], now: number): string {
   const lines = actions.map(
     (a) =>
-      `- "${a.text}" (선언일: ${relativeDays(a.createdAt, now)}, 상태: ${a.status})`,
+      `- "${a.text}" (선언: ${relativeDays(a.createdAt, now)} ${formatDeclaredAt(a.createdAt)}, 상태: ${a.status})`,
   );
   return `다음 미완료 행동들이 있다:\n${lines.join("\n")}`;
 }
@@ -121,7 +153,20 @@ const initialMessages: Record<string, TextChatMessage[]> = {
       time: "오전 09:12",
     },
   ],
-  zero: [],
+  zero: [
+    {
+      id: "1",
+      role: "coach",
+      text: "ZERO다. 분석 대기 중임.",
+      time: "오전 09:12",
+    },
+    {
+      id: "2",
+      role: "coach",
+      text: "현재 진행 중인 행동 또는 결정 대상이 있나? 변수 알려줘.",
+      time: "오전 09:12",
+    },
+  ],
   nova: [],
 };
 
@@ -212,6 +257,14 @@ export default function ChatScreen() {
         if (cancelled) return;
         const baseHistory: ChatTurn[] = toChatTurns(saved);
 
+        const lastSavedTs =
+          saved.length > 0 ? saved[saved.length - 1].createdAt : null;
+        const reconnectGap = lastSavedTs !== null ? now - lastSavedTs : 0;
+        const reconnectContent =
+          reconnectGap >= SESSION_GAP_MS
+            ? `[세션 휴지: ${formatGap(reconnectGap)}]\n(접속)`
+            : "(접속)";
+
         const time = formatTime(now);
         const coachMsgId = `nag_${now}`;
         const coachMsg: ChatMessage = {
@@ -228,7 +281,10 @@ export default function ChatScreen() {
         try {
           await streamCoachReply({
             coachId,
-            history: [...baseHistory, { role: "user", content: "(접속)" }],
+            history: [
+              ...baseHistory,
+              { role: "user", content: reconnectContent },
+            ],
             extraContext: buildPendingContext(pending, now),
             onDelta: (chunk) => {
               finalText += chunk;
