@@ -24,8 +24,29 @@ import {
   setLastNagAt,
   type Action,
 } from "@/lib/actions";
+import {
+  getMessages,
+  appendMessage,
+  type Message,
+} from "@/lib/messages";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function toChatMessage(m: Message): ChatMessage {
+  return {
+    id: m.id,
+    role: m.role === "user" ? "user" : "coach",
+    text: m.content,
+    time: formatTime(m.createdAt),
+  };
+}
 
 function relativeDays(ts: number, now: number): string {
   const days = Math.floor((now - ts) / DAY_MS);
@@ -79,16 +100,33 @@ export default function ChatScreen() {
   const router = useRouter();
   const { selectedCoach } = useSession();
   const listRef = useRef<FlatList<ChatMessage>>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    selectedCoach ? initialMessages[selectedCoach] ?? [] : []
-  );
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (selectedCoach) {
-      setMessages(initialMessages[selectedCoach] ?? []);
-    }
+    if (!selectedCoach) return;
+    const coachId = selectedCoach;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const saved = await getMessages(coachId);
+        if (cancelled) return;
+        if (saved.length > 0) {
+          setMessages(saved.map(toChatMessage));
+        } else {
+          setMessages(initialMessages[coachId] ?? []);
+        }
+      } catch (err) {
+        console.warn("messages load failed", err);
+        if (!cancelled) setMessages(initialMessages[coachId] ?? []);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedCoach]);
 
   useEffect(() => {
@@ -106,10 +144,14 @@ export default function ChatScreen() {
         if (lastNagAt !== null && now - lastNagAt < DAY_MS) return;
         if (cancelled) return;
 
-        const time = new Date().toLocaleTimeString("ko-KR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        const saved = await getMessages(coachId);
+        if (cancelled) return;
+        const baseHistory: ChatTurn[] = saved.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        const time = formatTime(now);
         const coachMsgId = `nag_${now}`;
         const coachMsg: ChatMessage = {
           id: coachMsgId,
@@ -121,12 +163,14 @@ export default function ChatScreen() {
         setSending(true);
         setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
 
+        let finalText = "";
         try {
           await streamCoachReply({
             coachId,
-            history: [{ role: "user", content: "(접속)" }],
+            history: [...baseHistory, { role: "user", content: "(접속)" }],
             extraContext: buildPendingContext(pending, now),
             onDelta: (chunk) => {
+              finalText += chunk;
               if (cancelled) return;
               setMessages((prev) =>
                 prev.map((m) =>
@@ -136,6 +180,20 @@ export default function ChatScreen() {
               listRef.current?.scrollToEnd({ animated: true });
             },
           });
+
+          if (finalText) {
+            try {
+              await appendMessage(coachId, {
+                id: coachMsgId,
+                coachId,
+                role: "assistant",
+                content: finalText,
+                createdAt: now,
+              });
+            } catch (err) {
+              console.warn("nag persist failed", err);
+            }
+          }
 
           try {
             await setLastNagAt(coachId, now);
@@ -173,17 +231,17 @@ export default function ChatScreen() {
     const text = input.trim();
     if (!text || sending) return;
     Haptics.selectionAsync().catch(() => {});
-    const time = new Date().toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const coachId = selectedCoach;
+    const now = Date.now();
+    const time = formatTime(now);
+    const userMsgId = String(now);
+    const coachMsgId = String(now + 1);
     const userMsg: ChatMessage = {
-      id: String(Date.now()),
+      id: userMsgId,
       role: "user",
       text,
       time,
     };
-    const coachMsgId = String(Date.now() + 1);
     const coachMsg: ChatMessage = {
       id: coachMsgId,
       role: "coach",
@@ -191,22 +249,36 @@ export default function ChatScreen() {
       time,
     };
 
-    const baseMessages = [...messages, userMsg];
-    setMessages([...baseMessages, coachMsg]);
+    setMessages((prev) => [...prev, userMsg, coachMsg]);
     setInput("");
     setSending(true);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
 
-    const history: ChatTurn[] = baseMessages.map((m) => ({
-      role: m.role === "user" ? "user" : "assistant",
-      content: m.text,
+    try {
+      await appendMessage(coachId, {
+        id: userMsgId,
+        coachId,
+        role: "user",
+        content: text,
+        createdAt: now,
+      });
+    } catch (err) {
+      console.warn("user msg persist failed", err);
+    }
+
+    const saved = await getMessages(coachId);
+    const history: ChatTurn[] = saved.map((m) => ({
+      role: m.role,
+      content: m.content,
     }));
 
+    let finalText = "";
     try {
       await streamCoachReply({
-        coachId: selectedCoach,
+        coachId,
         history,
         onDelta: (chunk) => {
+          finalText += chunk;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === coachMsgId ? { ...m, text: m.text + chunk } : m,
@@ -215,6 +287,20 @@ export default function ChatScreen() {
           listRef.current?.scrollToEnd({ animated: true });
         },
       });
+
+      if (finalText) {
+        try {
+          await appendMessage(coachId, {
+            id: coachMsgId,
+            coachId,
+            role: "assistant",
+            content: finalText,
+            createdAt: Date.now(),
+          });
+        } catch (err) {
+          console.warn("coach msg persist failed", err);
+        }
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "응답 중 오류가 발생했어";
