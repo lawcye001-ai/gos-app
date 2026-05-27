@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { CoachId } from "@/data/coaches";
 import { saveAction, type Action, type ActionStatus } from "@/lib/actions";
 import {
@@ -501,18 +501,97 @@ const RESOLVE_DECISION_TOOL: Anthropic.Tool = {
   },
 };
 
-function getClient(): Anthropic {
-  const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("EXPO_PUBLIC_ANTHROPIC_API_KEY 설정 필요");
-  }
-  return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+function getApiBase(): string {
+  // Web: same-origin. Mobile/dev URL은 4단계에서 별도 모듈로 추출 예정.
+  return "";
 }
 
 type RunMessages = Array<{
   role: "user" | "assistant";
   content: string | Anthropic.ContentBlockParam[];
 }>;
+
+type BackendFinal = {
+  content: Anthropic.ContentBlock[];
+  stop_reason: Anthropic.Message["stop_reason"];
+};
+
+async function callBackend(opts: {
+  system: string;
+  messages: RunMessages;
+  tools: Anthropic.Tool[];
+  onText: (chunk: string) => void;
+  signal?: AbortSignal;
+}): Promise<BackendFinal> {
+  const url = `${getApiBase()}/api/coach`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system: opts.system,
+      messages: opts.messages,
+      tools: opts.tools,
+      model: MODEL,
+      maxTokens: 1024,
+    }),
+    signal: opts.signal,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `/api/coach ${response.status}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  if (!response.body) {
+    throw new Error("/api/coach: 응답 본문 없음");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: BackendFinal | null = null;
+  let errMsg: string | null = null;
+
+  const flushEvent = (rawEvent: string) => {
+    let eventType = "message";
+    let dataLine = "";
+    for (const line of rawEvent.split("\n")) {
+      if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+      else if (line.startsWith("data: ")) dataLine += line.slice(6);
+    }
+    if (!dataLine) return;
+    const data = JSON.parse(dataLine);
+    if (eventType === "text") {
+      if (typeof data.text === "string") opts.onText(data.text);
+    } else if (eventType === "done") {
+      final = {
+        content: data.content as Anthropic.ContentBlock[],
+        stop_reason: data.stop_reason as Anthropic.Message["stop_reason"],
+      };
+    } else if (eventType === "error") {
+      errMsg = typeof data.message === "string" ? data.message : "stream failed";
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      flushEvent(rawEvent);
+    }
+  }
+
+  if (buffer.trim().length > 0) flushEvent(buffer);
+
+  if (errMsg) throw new Error(errMsg);
+  if (!final) throw new Error("/api/coach: done 이벤트 누락");
+  return final;
+}
 
 function formatNowForSystem(ts: number): string {
   const d = new Date(ts);
@@ -527,7 +606,6 @@ function formatNowForSystem(ts: number): string {
 
 export async function streamCoachReply(opts: StreamOptions): Promise<string> {
   const { coachId, history, onDelta, onAction, onDecisionCard, extraContext, signal } = opts;
-  const client = getClient();
   const baseSystem = SYSTEM_PROMPTS[coachId];
   const timeBlock =
     `[현재 시각]\n${formatNowForSystem(Date.now())}\n` +
@@ -535,6 +613,13 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
   const system = extraContext
     ? `${baseSystem}\n\n${timeBlock}\n\n[현재 컨텍스트]\n${extraContext}`
     : `${baseSystem}\n\n${timeBlock}`;
+
+  const tools: Anthropic.Tool[] = [
+    ACTION_TOOL,
+    ISSUE_DECISION_CARD_TOOL,
+    GET_ACTIVE_DECISIONS_TOOL,
+    RESOLVE_DECISION_TOOL,
+  ];
 
   const messages: RunMessages = history.map((t) => ({
     role: t.role,
@@ -544,32 +629,20 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
   let finalText = "";
 
   for (let step = 0; step < 3; step++) {
-    const stream = client.messages.stream(
-      {
-        model: MODEL,
-        max_tokens: 1024,
-        system,
-        tools: [
-          ACTION_TOOL,
-          ISSUE_DECISION_CARD_TOOL,
-          GET_ACTIVE_DECISIONS_TOOL,
-          RESOLVE_DECISION_TOOL,
-        ],
-        messages,
-      },
-      { signal },
-    );
-
     let stepText = "";
-    const toolUses: Anthropic.ToolUseBlock[] = [];
 
-    stream.on("text", (delta) => {
-      stepText += delta;
-      onDelta(delta);
+    const final = await callBackend({
+      system,
+      messages,
+      tools,
+      signal,
+      onText: (delta) => {
+        stepText += delta;
+        onDelta(delta);
+      },
     });
 
-    const final = await stream.finalMessage();
-
+    const toolUses: Anthropic.ToolUseBlock[] = [];
     for (const block of final.content) {
       if (block.type === "tool_use") toolUses.push(block);
     }
