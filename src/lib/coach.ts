@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { CoachId } from "@/data/coaches";
+import { getApiBase } from "@/lib/apiBase";
 import { saveAction, type Action, type ActionStatus } from "@/lib/actions";
 import {
   appendDecision,
@@ -500,11 +501,6 @@ const RESOLVE_DECISION_TOOL: Anthropic.Tool = {
     required: ["decisionId", "newCard", "reason"],
   },
 };
-
-function getApiBase(): string {
-  // Web: same-origin. Mobile/dev URL은 4단계에서 별도 모듈로 추출 예정.
-  return "";
-}
 
 type RunMessages = Array<{
   role: "user" | "assistant";
