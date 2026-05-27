@@ -63,7 +63,7 @@ export const coaches: Coach[] = [
     secondary: "#374151",
     bubbleBg: "#16181D",
     bubbleText: "#D1D5DB",
-    available: false,
+    available: true,
     sampleLines: [
       "지난 7일 중 5일 동일한 핑계를 사용했음.",
       "이 패턴을 유지하면 목표 달성 확률 18%.",
@@ -81,7 +81,7 @@ export const coaches: Coach[] = [
     secondary: "#D97706",
     bubbleBg: "#2A1F0F",
     bubbleText: "#FDE68A",
-    available: false,
+    available: true,
     sampleLines: [
       "야 그거 진짜였어? ㅋㅋ 일단 들어줄게.",
       "오늘은 좀 쉬자, 내일 같이 가자고.",
