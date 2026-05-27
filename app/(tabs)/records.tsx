@@ -113,6 +113,7 @@ function FilterRow({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={styles.filterScroll}
       contentContainerStyle={styles.filterRow}
     >
       <FilterChip
@@ -303,18 +304,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  filterScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   filterRow: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.sm,
-    flexDirection: "row",
+    alignItems: "center",
   },
   chip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    height: 32,
+    justifyContent: "center",
     borderRadius: radius.pill,
     borderWidth: 1,
     backgroundColor: colors.bgCard,
+    alignSelf: "center",
   },
   chipText: {
     fontSize: 13,
