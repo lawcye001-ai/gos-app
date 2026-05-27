@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CoachId } from "@/data/coaches";
 
-export type Message = {
+export type TextMessage = {
   id: string;
   coachId: CoachId;
   role: "user" | "assistant";
@@ -9,10 +9,26 @@ export type Message = {
   createdAt: number;
 };
 
+export type DecisionMessage = {
+  id: string;
+  coachId: CoachId;
+  role: "decision";
+  decisionId: string;
+  createdAt: number;
+};
+
+export type Message = TextMessage | DecisionMessage;
+
 const KEY_PREFIX = "gos.messages.";
 
 function keyFor(coachId: CoachId): string {
   return `${KEY_PREFIX}${coachId}`;
+}
+
+function isKnownMessage(m: unknown): m is Message {
+  if (!m || typeof m !== "object") return false;
+  const role = (m as { role?: unknown }).role;
+  return role === "user" || role === "assistant" || role === "decision";
 }
 
 export async function getMessages(coachId: CoachId): Promise<Message[]> {
@@ -20,7 +36,8 @@ export async function getMessages(coachId: CoachId): Promise<Message[]> {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Message[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isKnownMessage);
   } catch {
     return [];
   }

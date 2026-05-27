@@ -34,7 +34,7 @@ import {
   appendMessage,
   type Message,
 } from "@/lib/messages";
-import type { Decision } from "@/lib/decisions";
+import { getDecisions, type Decision } from "@/lib/decisions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,13 +45,36 @@ function formatTime(ts: number): string {
   });
 }
 
-function toChatMessage(m: Message): ChatMessage {
+function toChatMessage(
+  m: Message,
+  decisionsById: Map<string, Decision>,
+): ChatMessage | null {
+  if (m.role === "decision") {
+    const decision = decisionsById.get(m.decisionId);
+    if (!decision) return null;
+    return {
+      id: m.id,
+      role: "decision",
+      decision,
+      time: formatTime(m.createdAt),
+    };
+  }
   return {
     id: m.id,
     role: m.role === "user" ? "user" : "coach",
     text: m.content,
     time: formatTime(m.createdAt),
   };
+}
+
+function toChatTurns(saved: Message[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  for (const m of saved) {
+    if (m.role === "user" || m.role === "assistant") {
+      turns.push({ role: m.role, content: m.content });
+    }
+  }
+  return turns;
 }
 
 function relativeDays(ts: number, now: number): string {
@@ -117,10 +140,17 @@ export default function ChatScreen() {
 
     (async () => {
       try {
-        const saved = await getMessages(coachId);
+        const [saved, decisions] = await Promise.all([
+          getMessages(coachId),
+          getDecisions(coachId),
+        ]);
         if (cancelled) return;
+        const decisionsById = new Map(decisions.map((d) => [d.id, d]));
         if (saved.length > 0) {
-          setMessages(saved.map(toChatMessage));
+          const converted = saved
+            .map((m) => toChatMessage(m, decisionsById))
+            .filter((m): m is ChatMessage => m !== null);
+          setMessages(converted);
           return;
         }
 
@@ -138,7 +168,11 @@ export default function ChatScreen() {
           content: g.text,
           createdAt: now,
         }));
-        setMessages(persisted.map(toChatMessage));
+        setMessages(
+          persisted
+            .map((m) => toChatMessage(m, decisionsById))
+            .filter((m): m is ChatMessage => m !== null),
+        );
 
         try {
           for (const m of persisted) {
@@ -176,10 +210,7 @@ export default function ChatScreen() {
 
         const saved = await getMessages(coachId);
         if (cancelled) return;
-        const baseHistory: ChatTurn[] = saved.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
+        const baseHistory: ChatTurn[] = toChatTurns(saved);
 
         const time = formatTime(now);
         const coachMsgId = `nag_${now}`;
@@ -215,19 +246,28 @@ export default function ChatScreen() {
             },
             onDecisionCard: (decision) => {
               if (cancelled) return;
+              const createdAt = Date.now();
+              const msgId = `dec_${decision.id}`;
               setMessages((prev) => [
                 ...prev,
                 {
-                  id: `dec_${decision.id}`,
+                  id: msgId,
                   role: "decision",
                   decision,
-                  time: formatTime(Date.now()),
+                  time: formatTime(createdAt),
                 },
               ]);
               setTimeout(
                 () => listRef.current?.scrollToEnd({ animated: true }),
                 50,
               );
+              appendMessage(coachId, {
+                id: msgId,
+                coachId,
+                role: "decision",
+                decisionId: decision.id,
+                createdAt,
+              }).catch((err) => console.warn("decision msg persist failed", err));
             },
           });
 
@@ -319,10 +359,7 @@ export default function ChatScreen() {
     }
 
     const saved = await getMessages(coachId);
-    const history: ChatTurn[] = saved.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const history: ChatTurn[] = toChatTurns(saved);
 
     let finalText = "";
     try {
@@ -343,19 +380,28 @@ export default function ChatScreen() {
           listRef.current?.scrollToEnd({ animated: true });
         },
         onDecisionCard: (decision) => {
+          const createdAt = Date.now();
+          const msgId = `dec_${decision.id}`;
           setMessages((prev) => [
             ...prev,
             {
-              id: `dec_${decision.id}`,
+              id: msgId,
               role: "decision",
               decision,
-              time: formatTime(Date.now()),
+              time: formatTime(createdAt),
             },
           ]);
           setTimeout(
             () => listRef.current?.scrollToEnd({ animated: true }),
             50,
           );
+          appendMessage(coachId, {
+            id: msgId,
+            coachId,
+            role: "decision",
+            decisionId: decision.id,
+            createdAt,
+          }).catch((err) => console.warn("decision msg persist failed", err));
         },
       });
 
