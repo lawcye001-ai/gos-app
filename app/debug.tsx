@@ -21,6 +21,7 @@ type ActionRecord = {
   status?: string;
   updatedAt?: number;
   createdAt?: number;
+  startedAt?: number;
 };
 
 export default function DebugScreen() {
@@ -118,6 +119,7 @@ export default function DebugScreen() {
         const base = typeof a.updatedAt === "number" ? a.updatedAt : a.createdAt;
         if (typeof base === "number") a.updatedAt = base - offset;
         if (typeof a.createdAt === "number") a.createdAt = a.createdAt - offset;
+        if (typeof a.startedAt === "number") a.startedAt = a.startedAt - offset;
         touched++;
       }
     }
