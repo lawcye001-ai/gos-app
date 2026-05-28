@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.gos.app",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0B0B12"
       }

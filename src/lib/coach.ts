@@ -801,27 +801,51 @@ async function callBackend(opts: {
   signal?: AbortSignal;
 }): Promise<BackendFinal> {
   const url = `${getApiBase()}/api/coach`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system: opts.system,
-      messages: opts.messages,
-      tools: opts.tools,
-      model: MODEL,
-      maxTokens: 1024,
-    }),
-    signal: opts.signal,
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system: opts.system,
+        messages: opts.messages,
+        tools: opts.tools,
+        model: MODEL,
+        maxTokens: 1024,
+      }),
+      signal: opts.signal,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[coach] fetch network error", { url, msg });
+    throw new Error(`/api/coach 네트워크 에러: ${msg}`);
+  }
+
+  console.log("[coach] fetch response", {
+    url,
+    status: response.status,
+    statusText: response.statusText,
+    hasBody: !!response.body,
   });
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
+    console.error("[coach] non-OK response", {
+      status: response.status,
+      bodyPreview: detail.slice(0, 200),
+    });
     throw new Error(
-      `/api/coach ${response.status}${detail ? `: ${detail}` : ""}`,
+      `/api/coach ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`,
     );
   }
   if (!response.body) {
-    throw new Error("/api/coach: 응답 본문 없음");
+    const bodyText = await response.text().catch(() => "");
+    console.error("[coach] response.body is null (RN fetch streaming 미지원 가능)", {
+      bodyPreview: bodyText.slice(0, 200),
+    });
+    throw new Error(
+      `/api/coach 네트워크 에러: 응답 스트림 없음 (RN fetch streaming 미지원). body=${bodyText.slice(0, 80)}`,
+    );
   }
 
   const reader = response.body.getReader();
