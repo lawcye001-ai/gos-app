@@ -13,6 +13,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { GoalForm, type GoalFormValues } from "@/components/goals/GoalForm";
 import { deleteGoal, getGoalById, updateGoal } from "@/lib/goals/storage";
+import {
+  syncOnDelete,
+  syncOnUpdate,
+} from "@/lib/goals/syncNotifications";
+import { triggerImmediateDebugNotification } from "@/lib/goals/scheduler";
 import type { Goal } from "@/types/goal";
 import { colors, radius, spacing } from "@/theme/colors";
 
@@ -46,13 +51,19 @@ export default function GoalDetailScreen() {
   const handleSubmit = async (values: GoalFormValues) => {
     if (!goal) return;
     try {
-      await updateGoal(goal.id, {
+      const prev = goal;
+      const updated = await updateGoal(goal.id, {
         title: values.title,
         coachId: values.coachId,
         frequency: values.frequency,
         timeOfDay: values.timeOfDay,
         active: values.active,
       });
+      try {
+        await syncOnUpdate(updated, prev);
+      } catch (e) {
+        console.warn("[goal detail] notification sync failed", e);
+      }
       router.replace({
         pathname: "/(tabs)/goals",
         params: { ts: String(Date.now()) },
@@ -88,6 +99,11 @@ export default function GoalDetailScreen() {
 
     if (!confirmed) return;
     try {
+      try {
+        await syncOnDelete(goal);
+      } catch (e) {
+        console.warn("[goal detail] notification sync failed", e);
+      }
       await deleteGoal(goal.id);
       router.replace({
         pathname: "/(tabs)/goals",
@@ -95,6 +111,16 @@ export default function GoalDetailScreen() {
       });
     } catch (e) {
       console.error("[goal detail] delete failed", e);
+    }
+  };
+
+  const handleDebugNotify = async () => {
+    if (!goal) return;
+    try {
+      await triggerImmediateDebugNotification(goal, 5);
+      console.log("[goal detail] debug notification scheduled in 5s");
+    } catch (e) {
+      console.error("[goal detail] debug notification failed", e);
     }
   };
 
@@ -129,19 +155,33 @@ export default function GoalDetailScreen() {
           </Pressable>
         </View>
       ) : (
-        <GoalForm
-          initial={{
-            title: goal.title,
-            coachId: goal.coachId,
-            frequency: goal.frequency,
-            timeOfDay: goal.timeOfDay,
-            active: goal.active,
-          }}
-          submitLabel="저장"
-          onSubmit={handleSubmit}
-          onCancel={() => router.back()}
-          onDelete={handleDelete}
-        />
+        <>
+          {__DEV__ && (
+            <Pressable
+              onPress={handleDebugNotify}
+              style={({ pressed }) => [
+                styles.debugButton,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons name="notifications" size={14} color={colors.warning} />
+              <Text style={styles.debugText}>지금 알림 보내기 (5초 후)</Text>
+            </Pressable>
+          )}
+          <GoalForm
+            initial={{
+              title: goal.title,
+              coachId: goal.coachId,
+              frequency: goal.frequency,
+              timeOfDay: goal.timeOfDay,
+              active: goal.active,
+            }}
+            submitLabel="저장"
+            onSubmit={handleSubmit}
+            onCancel={() => router.back()}
+            onDelete={handleDelete}
+          />
+        </>
       )}
     </SafeAreaView>
   );
@@ -191,5 +231,24 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: "700",
+  },
+  debugButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warning + "66",
+    backgroundColor: colors.warning + "11",
+  },
+  debugText: {
+    color: colors.warning,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
 });

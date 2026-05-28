@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { GoalForm, type GoalFormValues } from "@/components/goals/GoalForm";
 import { createGoal } from "@/lib/goals/storage";
+import { syncOnCreate } from "@/lib/goals/syncNotifications";
 import { colors, spacing } from "@/theme/colors";
 
 export default function NewGoalScreen() {
@@ -11,7 +12,7 @@ export default function NewGoalScreen() {
 
   const handleSubmit = async (values: GoalFormValues) => {
     try {
-      await createGoal({
+      const created = await createGoal({
         title: values.title,
         coachId: values.coachId,
         frequency: values.frequency,
@@ -19,6 +20,11 @@ export default function NewGoalScreen() {
         active: values.active,
         createdVia: "tab",
       });
+      try {
+        await syncOnCreate(created);
+      } catch (e) {
+        console.warn("[new goal] notification sync failed", e);
+      }
       router.replace({
         pathname: "/(tabs)/goals",
         params: { ts: String(Date.now()) },

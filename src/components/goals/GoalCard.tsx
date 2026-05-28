@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, Switch } from "react-native";
 import { getCoach } from "@/data/coaches";
 import type { Goal } from "@/types/goal";
 import { updateGoal } from "@/lib/goals/storage";
+import { syncOnActiveToggle } from "@/lib/goals/syncNotifications";
 import { formatFrequency } from "@/lib/goals/formatFrequency";
 import { colors, radius, spacing } from "@/theme/colors";
 
@@ -23,6 +24,11 @@ export function GoalCard({ goal, onPress, onChange }: Props) {
     setActive(value);
     try {
       const updated = await updateGoal(goal.id, { active: value });
+      try {
+        await syncOnActiveToggle(updated);
+      } catch (e) {
+        console.warn("[GoalCard] notification sync failed", e);
+      }
       onChange?.(updated);
     } catch (e) {
       console.error("[GoalCard] toggle failed", e);
