@@ -19,7 +19,10 @@ export default function NewGoalScreen() {
         active: values.active,
         createdVia: "tab",
       });
-      router.replace("/goals");
+      router.replace({
+        pathname: "/(tabs)/goals",
+        params: { ts: String(Date.now()) },
+      });
     } catch (e) {
       console.error("[new goal] create failed", e);
     }

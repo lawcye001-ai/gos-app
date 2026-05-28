@@ -54,7 +54,12 @@ export function GoalCard({ goal, onPress, onChange }: Props) {
           <Text style={styles.frequency}>{formatFrequency(goal)}</Text>
         </View>
       </View>
-      <View style={styles.right}>
+      <View
+        style={styles.right}
+        onStartShouldSetResponder={() => true}
+        onResponderRelease={() => {}}
+        {...stopWebClick}
+      >
         <Switch
           value={active}
           onValueChange={toggleActive}
@@ -66,6 +71,12 @@ export function GoalCard({ goal, onPress, onChange }: Props) {
     </Pressable>
   );
 }
+
+const stopWebClick: Record<string, unknown> = {
+  onClick: (e: { stopPropagation?: () => void }) => {
+    e.stopPropagation?.();
+  },
+};
 
 const styles = StyleSheet.create({
   card: {

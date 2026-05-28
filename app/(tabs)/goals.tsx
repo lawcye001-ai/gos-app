@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { GoalCard } from "@/components/goals/GoalCard";
 import { getAllGoals } from "@/lib/goals/storage";
 import type { Goal } from "@/types/goal";
@@ -17,8 +17,23 @@ import { colors, radius, spacing } from "@/theme/colors";
 
 export default function GoalsScreen() {
   const router = useRouter();
+  const { ts } = useLocalSearchParams<{ ts?: string }>();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const loadGoals = useCallback(async () => {
+    setLoading(true);
+    try {
+      const all = await getAllGoals();
+      all.sort((a, b) => b.createdAt - a.createdAt);
+      setGoals(all);
+    } catch (e) {
+      console.error("[goals] load failed", e);
+      setGoals([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,6 +57,11 @@ export default function GoalsScreen() {
       };
     }, []),
   );
+
+  useEffect(() => {
+    if (!ts) return;
+    loadGoals();
+  }, [ts, loadGoals]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

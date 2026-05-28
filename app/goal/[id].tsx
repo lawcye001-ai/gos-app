@@ -52,7 +52,10 @@ export default function GoalDetailScreen() {
         timeOfDay: values.timeOfDay,
         active: values.active,
       });
-      router.back();
+      router.replace({
+        pathname: "/(tabs)/goals",
+        params: { ts: String(Date.now()) },
+      });
     } catch (e) {
       console.error("[goal detail] update failed", e);
     }
@@ -71,7 +74,10 @@ export default function GoalDetailScreen() {
           onPress: async () => {
             try {
               await deleteGoal(goal.id);
-              router.back();
+              router.replace({
+                pathname: "/(tabs)/goals",
+                params: { ts: String(Date.now()) },
+              });
             } catch (e) {
               console.error("[goal detail] delete failed", e);
             }
