@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -61,30 +62,40 @@ export default function GoalDetailScreen() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!goal) return;
-    Alert.alert(
-      "목표 삭제",
-      `"${goal.title}" 을(를) 삭제할까요? 관련 알림 기록도 함께 삭제돼요.`,
-      [
-        { text: "취소", style: "cancel" },
-        {
-          text: "삭제",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteGoal(goal.id);
-              router.replace({
-                pathname: "/(tabs)/goals",
-                params: { ts: String(Date.now()) },
-              });
-            } catch (e) {
-              console.error("[goal detail] delete failed", e);
-            }
-          },
-        },
-      ],
-    );
+    const title = "목표 삭제";
+    const message = `"${goal.title}" 을(를) 삭제할까요? 관련 알림 기록도 함께 삭제돼요.`;
+
+    const confirmed =
+      Platform.OS === "web"
+        ? typeof window !== "undefined" &&
+          window.confirm(`${title}\n\n${message}`)
+        : await new Promise<boolean>((resolve) => {
+            Alert.alert(title, message, [
+              {
+                text: "취소",
+                style: "cancel",
+                onPress: () => resolve(false),
+              },
+              {
+                text: "삭제",
+                style: "destructive",
+                onPress: () => resolve(true),
+              },
+            ]);
+          });
+
+    if (!confirmed) return;
+    try {
+      await deleteGoal(goal.id);
+      router.replace({
+        pathname: "/(tabs)/goals",
+        params: { ts: String(Date.now()) },
+      });
+    } catch (e) {
+      console.error("[goal detail] delete failed", e);
+    }
   };
 
   return (
