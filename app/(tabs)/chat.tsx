@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,6 +33,7 @@ import {
 import {
   getMessages,
   appendMessage,
+  clearMessages,
   type Message,
 } from "@/lib/messages";
 import { getDecisions, type Decision } from "@/lib/decisions";
@@ -177,6 +179,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!selectedCoach) return;
@@ -236,7 +239,7 @@ export default function ChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCoach]);
+  }, [selectedCoach, reloadKey]);
 
   useEffect(() => {
     if (!selectedCoach) return;
@@ -489,9 +492,42 @@ export default function ChatScreen() {
     }
   };
 
+  const handleMenuPress = async () => {
+    if (!__DEV__) return;
+    if (selectedCoach !== "nova") return;
+    const coachId = selectedCoach;
+    const title = "[DEV] NOVA 대화 초기화";
+    const message = "저장된 NOVA 채팅 기록을 모두 삭제하고 초기 인사로 리셋할까요?";
+
+    const confirmed =
+      Platform.OS === "web"
+        ? typeof window !== "undefined" &&
+          window.confirm(`${title}\n\n${message}`)
+        : await new Promise<boolean>((resolve) => {
+            Alert.alert(title, message, [
+              { text: "취소", style: "cancel", onPress: () => resolve(false) },
+              {
+                text: "초기화",
+                style: "destructive",
+                onPress: () => resolve(true),
+              },
+            ]);
+          });
+
+    if (!confirmed) return;
+    try {
+      await clearMessages(coachId);
+    } catch (e) {
+      console.error("[chat] clear nova failed", e);
+      return;
+    }
+    setMessages([]);
+    setReloadKey((k) => k + 1);
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <ChatHeader coach={coach} />
+      <ChatHeader coach={coach} onMenuPress={handleMenuPress} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -547,7 +583,13 @@ export default function ChatScreen() {
   );
 }
 
-function ChatHeader({ coach }: { coach: ReturnType<typeof getCoach> }) {
+function ChatHeader({
+  coach,
+  onMenuPress,
+}: {
+  coach: ReturnType<typeof getCoach>;
+  onMenuPress?: () => void;
+}) {
   return (
     <View style={styles.header}>
       <View style={[styles.headerAvatar, { backgroundColor: coach.bubbleBg, borderColor: coach.primary }]}>
@@ -560,7 +602,7 @@ function ChatHeader({ coach }: { coach: ReturnType<typeof getCoach> }) {
           <Text style={styles.statusText}>{coach.tagline} · 온라인</Text>
         </View>
       </View>
-      <Pressable style={styles.iconButton}>
+      <Pressable onPress={onMenuPress} style={styles.iconButton}>
         <Ionicons name="ellipsis-vertical" size={20} color={colors.textMuted} />
       </Pressable>
     </View>

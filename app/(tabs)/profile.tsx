@@ -50,6 +50,30 @@ export default function ProfileScreen() {
           <Text style={styles.label}>계정</Text>
           <Text style={styles.empty}>로그인은 백엔드 연결 후 추가됩니다.</Text>
         </View>
+
+        {__DEV__ && (
+          <View style={[styles.card, { borderColor: colors.danger + "66" }]}>
+            <Text style={[styles.label, { color: colors.danger }]}>
+              [DEV] 디버그
+            </Text>
+            <Pressable
+              onPress={() => router.push("/debug")}
+              style={({ pressed }) => [
+                styles.button,
+                {
+                  borderColor: colors.danger + "55",
+                  backgroundColor: colors.danger + "11",
+                },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons name="bug" size={16} color={colors.danger} />
+              <Text style={[styles.buttonText, { color: colors.danger }]}>
+                디버그 메뉴 열기
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
