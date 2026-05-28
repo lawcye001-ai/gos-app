@@ -10,6 +10,9 @@ export type Action = {
   status: ActionStatus;
   createdAt: number;
   updatedAt: number;
+  startedAt?: number;
+  durationMinutes?: number;
+  completedAt?: number;
 };
 
 const STORAGE_KEY = "gos.actions";
@@ -38,6 +41,7 @@ export type SaveActionInput = {
   coachId: CoachId;
   text: string;
   status: ActionStatus;
+  durationMinutes?: number;
 };
 
 export async function saveAction(input: SaveActionInput): Promise<Action> {
@@ -47,11 +51,24 @@ export async function saveAction(input: SaveActionInput): Promise<Action> {
   if (input.id) {
     const idx = all.findIndex((a) => a.id === input.id);
     if (idx >= 0) {
+      const prev = all[idx];
       const updated: Action = {
-        ...all[idx],
+        ...prev,
         text: input.text,
         status: input.status,
         updatedAt: now,
+        durationMinutes:
+          input.durationMinutes !== undefined
+            ? input.durationMinutes
+            : prev.durationMinutes,
+        startedAt:
+          input.status === "in_progress" && prev.startedAt === undefined
+            ? now
+            : prev.startedAt,
+        completedAt:
+          input.status === "done" && prev.completedAt === undefined
+            ? now
+            : prev.completedAt,
       };
       all[idx] = updated;
       await writeAll(all);
@@ -66,6 +83,9 @@ export async function saveAction(input: SaveActionInput): Promise<Action> {
     status: input.status,
     createdAt: now,
     updatedAt: now,
+    durationMinutes: input.durationMinutes,
+    startedAt: input.status === "in_progress" ? now : undefined,
+    completedAt: input.status === "done" ? now : undefined,
   };
   all.push(created);
   await writeAll(all);
@@ -89,7 +109,19 @@ export async function updateActionStatus(
   const all = await readAll();
   const idx = all.findIndex((a) => a.id === id);
   if (idx < 0) return null;
-  const updated: Action = { ...all[idx], status, updatedAt: Date.now() };
+  const prev = all[idx];
+  const now = Date.now();
+  const updated: Action = {
+    ...prev,
+    status,
+    updatedAt: now,
+    startedAt:
+      status === "in_progress" && prev.startedAt === undefined
+        ? now
+        : prev.startedAt,
+    completedAt:
+      status === "done" && prev.completedAt === undefined ? now : prev.completedAt,
+  };
   all[idx] = updated;
   await writeAll(all);
   return updated;

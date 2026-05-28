@@ -169,7 +169,20 @@ const initialMessages: Record<string, TextChatMessage[]> = {
       time: "오전 09:12",
     },
   ],
-  nova: [],
+  nova: [
+    {
+      id: "1",
+      role: "coach",
+      text: "야 왔어? ㅋㅋ",
+      time: "오전 09:12",
+    },
+    {
+      id: "2",
+      role: "coach",
+      text: "뭐 일이야 오늘?",
+      time: "오전 09:12",
+    },
+  ],
 };
 
 export default function ChatScreen() {
