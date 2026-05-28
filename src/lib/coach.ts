@@ -1,4 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { Platform } from "react-native";
+import EventSource from "react-native-sse";
 import type { CoachId } from "@/data/coaches";
 import { getApiBase } from "@/lib/apiBase";
 import { saveAction, type Action, type ActionStatus } from "@/lib/actions";
@@ -793,13 +795,20 @@ type BackendFinal = {
   stop_reason: Anthropic.Message["stop_reason"];
 };
 
-async function callBackend(opts: {
+type CallBackendOpts = {
   system: string;
   messages: RunMessages;
   tools: Anthropic.Tool[];
   onText: (chunk: string) => void;
   signal?: AbortSignal;
-}): Promise<BackendFinal> {
+};
+
+async function callBackend(opts: CallBackendOpts): Promise<BackendFinal> {
+  if (Platform.OS === "web") return callBackendWeb(opts);
+  return callBackendNative(opts);
+}
+
+async function callBackendWeb(opts: CallBackendOpts): Promise<BackendFinal> {
   const url = `${getApiBase()}/api/coach`;
   let response: Response;
   try {
@@ -840,11 +849,11 @@ async function callBackend(opts: {
   }
   if (!response.body) {
     const bodyText = await response.text().catch(() => "");
-    console.error("[coach] response.body is null (RN fetch streaming 미지원 가능)", {
+    console.error("[coach] response.body is null", {
       bodyPreview: bodyText.slice(0, 200),
     });
     throw new Error(
-      `/api/coach 네트워크 에러: 응답 스트림 없음 (RN fetch streaming 미지원). body=${bodyText.slice(0, 80)}`,
+      `/api/coach 네트워크 에러: 응답 스트림 없음. body=${bodyText.slice(0, 80)}`,
     );
   }
 
@@ -892,6 +901,113 @@ async function callBackend(opts: {
   if (errMsg) throw new Error(errMsg);
   if (!final) throw new Error("/api/coach: done 이벤트 누락");
   return final;
+}
+
+async function callBackendNative(opts: CallBackendOpts): Promise<BackendFinal> {
+  const url = `${getApiBase()}/api/coach`;
+  return new Promise<BackendFinal>((resolve, reject) => {
+    const body = JSON.stringify({
+      system: opts.system,
+      messages: opts.messages,
+      tools: opts.tools,
+      model: MODEL,
+      maxTokens: 1024,
+    });
+
+    const es = new EventSource<"text" | "done">(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      pollingInterval: 0,
+    });
+
+    let settled = false;
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      try {
+        es.close();
+      } catch (e) {
+        console.warn("[coach] EventSource close failed", e);
+      }
+      action();
+    };
+
+    const abortHandler = () => {
+      settle(() => reject(new Error("/api/coach aborted")));
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        abortHandler();
+        return;
+      }
+      opts.signal.addEventListener("abort", abortHandler);
+    }
+
+    es.addEventListener("open", () => {
+      console.log("[coach] EventSource open", { url });
+    });
+
+    es.addEventListener("text", (event) => {
+      if (!event.data) return;
+      try {
+        const parsed = JSON.parse(event.data);
+        if (typeof parsed.text === "string") opts.onText(parsed.text);
+      } catch (e) {
+        console.warn("[coach] text parse failed", e);
+      }
+    });
+
+    es.addEventListener("done", (event) => {
+      if (!event.data) {
+        settle(() => reject(new Error("/api/coach: done 이벤트에 data 없음")));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(event.data);
+        const final: BackendFinal = {
+          content: parsed.content as Anthropic.ContentBlock[],
+          stop_reason: parsed.stop_reason as Anthropic.Message["stop_reason"],
+        };
+        settle(() => resolve(final));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        settle(() => reject(new Error(`/api/coach done 파싱 실패: ${msg}`)));
+      }
+    });
+
+    es.addEventListener("error", (event) => {
+      const e = event as {
+        type: string;
+        data?: string | null;
+        message?: string;
+        xhrStatus?: number;
+        xhrState?: number;
+      };
+      if (e.data) {
+        try {
+          const parsed = JSON.parse(e.data);
+          const msg =
+            typeof parsed.message === "string" ? parsed.message : "stream failed";
+          settle(() => reject(new Error(msg)));
+        } catch {
+          settle(() => reject(new Error("stream failed")));
+        }
+        return;
+      }
+      console.error("[coach] EventSource error", {
+        url,
+        type: e.type,
+        message: e.message,
+        xhrStatus: e.xhrStatus,
+      });
+      const detail = e.message ? `: ${e.message}` : "";
+      const status = typeof e.xhrStatus === "number" ? ` xhrStatus=${e.xhrStatus}` : "";
+      settle(() =>
+        reject(new Error(`/api/coach 네트워크 에러${detail}${status}`)),
+      );
+    });
+  });
 }
 
 function normalizeTopic(t: string): string {
