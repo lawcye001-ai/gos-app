@@ -1137,9 +1137,13 @@ export async function streamCoachReply(opts: StreamOptions): Promise<string> {
   const timeBlock =
     `[현재 시각]\n${formatNowForSystem(Date.now())}\n` +
     `시점 표현(오늘/어제/방금 등)은 반드시 이 시각과 대화 내 시점 단서(선언일 라벨, "[세션 휴지: ...]" 표시 등)를 기준으로 계산. 임의 추정 금지.`;
+  const buttonRule =
+    `[버튼 우선 규칙]\n` +
+    `사용자가 GO/HOLD/STOP 버튼을 직접 누르면 코드가 상태를 변경한다. ` +
+    `너는 자유 메시지를 보고 log_action·report_completion을 함부로 부르지 마라. 버튼 경로 우선.`;
   const system = extraContext
-    ? `${baseSystem}\n\n${timeBlock}\n\n[현재 컨텍스트]\n${extraContext}`
-    : `${baseSystem}\n\n${timeBlock}`;
+    ? `${baseSystem}\n\n${timeBlock}\n\n${buttonRule}\n\n[현재 컨텍스트]\n${extraContext}`
+    : `${baseSystem}\n\n${timeBlock}\n\n${buttonRule}`;
 
   const tools: Anthropic.Tool[] = [
     ACTION_TOOL,

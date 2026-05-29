@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { coaches } from "@/data/coaches";
+import { getActions, patchAction } from "@/lib/actions";
 import { colors, radius, spacing } from "@/theme/colors";
 
 type ActionRecord = {
@@ -99,6 +100,24 @@ export default function DebugScreen() {
     }
     await AsyncStorage.clear();
     return "AsyncStorage 전체 + 예약 알림 전부 삭제";
+  };
+
+  const cleanStaleActions = async () => {
+    const now = Date.now();
+    const CUTOFF_MS = 12 * 60 * 60 * 1000;
+    let cleaned = 0;
+    for (const c of coaches) {
+      const list = await getActions(c.id);
+      for (const a of list) {
+        if (a.status !== "in_progress" && a.status !== "paused") continue;
+        const base = a.startedAt ?? a.createdAt;
+        if (now - base >= CUTOFF_MS) {
+          await patchAction(a.id, { status: "abandoned" });
+          cleaned++;
+        }
+      }
+    }
+    return `${cleaned}개 정리됨`;
   };
 
   const jumpTime = async () => {
@@ -207,6 +226,18 @@ export default function DebugScreen() {
               "AsyncStorage 통째로 비우기",
               "앱의 로컬 저장소 전체와 OS 예약 알림이 전부 삭제됩니다. 코치 선택도 풀립니다.",
               clearEverything,
+            )
+          }
+        />
+        <DebugRow
+          title="stale 활성 행동 청소"
+          desc="12시간+ 경과한 in_progress/paused → abandoned 일괄"
+          disabled={busy}
+          onPress={() =>
+            confirmThenRun(
+              "stale 활성 행동 청소",
+              "모든 코치의 in_progress/paused 행동 중 시작(없으면 생성) 후 12시간 이상 지난 것을 '포기(abandoned)'로 일괄 정리합니다. 새 GO를 막던 stale 데이터 제거용.",
+              cleanStaleActions,
             )
           }
         />

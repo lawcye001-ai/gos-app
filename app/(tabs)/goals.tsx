@@ -13,6 +13,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { GoalCard } from "@/components/goals/GoalCard";
 import { getAllGoals } from "@/lib/goals/storage";
 import type { Goal } from "@/types/goal";
+import { HomeButton } from "@/components/HomeButton";
 import { colors, radius, spacing } from "@/theme/colors";
 
 export default function GoalsScreen() {
@@ -66,7 +67,10 @@ export default function GoalsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>목표</Text>
+        <View style={styles.headerLeft}>
+          <HomeButton />
+          <Text style={styles.headerTitle}>목표</Text>
+        </View>
         <Pressable
           onPress={() => router.push("/goal/new")}
           style={({ pressed }) => [
@@ -140,6 +144,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
   },
   headerTitle: {
     color: colors.text,

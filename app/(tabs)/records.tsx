@@ -3,37 +3,36 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  SectionList,
   ActivityIndicator,
   Pressable,
   ScrollView,
+  Alert,
+  ToastAndroid,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { coaches, getCoach, type CoachId } from "@/data/coaches";
 import { useHistory, type HistoryItem } from "@/hooks/useHistory";
 import type { Decision } from "@/lib/decisions";
-import type { Action } from "@/lib/actions";
+import { patchAction, type Action } from "@/lib/actions";
+import { HomeButton } from "@/components/HomeButton";
 import { colors, radius, spacing } from "@/theme/colors";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 type FilterValue = "all" | CoachId;
 
-type HeaderRow = { kind: "header"; id: string; label: string };
-type ListRow = HistoryItem | HeaderRow;
+// 상태별 섹션 순서. action.status 5개 + 결정(decision) 1개.
+const SECTION_DEFS: { key: Action["status"] | "decision"; label: string }[] = [
+  { key: "in_progress", label: "진행 중" },
+  { key: "paused", label: "일시멈춤" },
+  { key: "done", label: "완료" },
+  { key: "pending", label: "보류" },
+  { key: "abandoned", label: "포기" },
+  { key: "decision", label: "결정" },
+];
 
-function dayStart(ts: number): number {
-  const d = new Date(ts);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
-function dayLabel(ts: number, now: number): string {
-  const days = Math.round((dayStart(now) - dayStart(ts)) / DAY_MS);
-  if (days <= 0) return "오늘";
-  if (days === 1) return "어제";
-  return `${days}일 전`;
-}
+type Section = { title: string; data: HistoryItem[] };
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("ko-KR", {
@@ -42,8 +41,16 @@ function formatTime(ts: number): string {
   });
 }
 
+function showToast(message: string) {
+  if (Platform.OS === "android") {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+  } else {
+    Alert.alert("", message);
+  }
+}
+
 export default function RecordsScreen() {
-  const { items, loading } = useHistory();
+  const { items, loading, reload } = useHistory();
   const [filter, setFilter] = useState<FilterValue>("all");
 
   const filtered = useMemo(() => {
@@ -51,29 +58,42 @@ export default function RecordsScreen() {
     return items.filter((i) => i.coachId === filter);
   }, [items, filter]);
 
-  const rows = useMemo<ListRow[]>(() => {
-    if (filtered.length === 0) return [];
-    const now = Date.now();
-    const out: ListRow[] = [];
-    let lastLabel: string | null = null;
+  const sections = useMemo<Section[]>(() => {
+    const byKey = new Map<string, HistoryItem[]>();
     for (const item of filtered) {
-      const label = dayLabel(item.createdAt, now);
-      if (label !== lastLabel) {
-        out.push({
-          kind: "header",
-          id: `h:${label}:${item.createdAt}`,
-          label,
-        });
-        lastLabel = label;
-      }
-      out.push(item);
+      const key = item.kind === "decision" ? "decision" : item.action.status;
+      const arr = byKey.get(key);
+      if (arr) arr.push(item);
+      else byKey.set(key, [item]);
     }
-    return out;
+    return SECTION_DEFS.flatMap((def) => {
+      const data = byKey.get(def.key);
+      if (!data || data.length === 0) return [];
+      data.sort((a, b) => b.createdAt - a.createdAt);
+      return [{ title: `${def.label} (${data.length})`, data }];
+    });
   }, [filtered]);
+
+  const handleAbandon = (action: Action) => {
+    if (action.status !== "in_progress" && action.status !== "paused") return;
+    Alert.alert("포기로 표시", `'${action.text}'을(를) 포기 처리할까?`, [
+      { text: "취소", style: "cancel" },
+      {
+        text: "포기로 표시",
+        style: "destructive",
+        onPress: async () => {
+          await patchAction(action.id, { status: "abandoned" });
+          showToast("포기 처리됨");
+          reload();
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
+        <HomeButton />
         <Text style={styles.headerTitle}>기록</Text>
       </View>
 
@@ -83,17 +103,23 @@ export default function RecordsScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
         </View>
-      ) : rows.length === 0 ? (
+      ) : sections.length === 0 ? (
         <EmptyState />
       ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={(row) => row.id}
-          renderItem={({ item }) => {
-            if (item.kind === "header") return <DayHeader label={item.label} />;
-            if (item.kind === "decision") return <DecisionRow item={item} />;
-            return <ActionRow item={item} />;
-          }}
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) =>
+            item.kind === "decision" ? (
+              <DecisionRow item={item} />
+            ) : (
+              <ActionRow item={item} onAbandon={handleAbandon} />
+            )
+          }
+          renderSectionHeader={({ section }) => (
+            <SectionHeader title={section.title} />
+          )}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
         />
@@ -186,10 +212,10 @@ function EmptyState() {
   );
 }
 
-function DayHeader({ label }: { label: string }) {
+function SectionHeader({ title }: { title: string }) {
   return (
-    <View style={styles.dayHeader}>
-      <Text style={styles.dayHeaderText}>{label}</Text>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderText}>{title}</Text>
     </View>
   );
 }
@@ -254,19 +280,31 @@ const ACTION_ICONS: Record<
 > = {
   pending: { name: "ellipse-outline", color: colors.textDim },
   in_progress: { name: "time", color: colors.warning },
+  paused: { name: "pause-circle", color: colors.textMuted },
   done: { name: "checkmark-circle", color: colors.success },
   abandoned: { name: "close-circle", color: colors.textDim },
 };
 
 function ActionRow({
   item,
+  onAbandon,
 }: {
   item: Extract<HistoryItem, { kind: "action" }>;
+  onAbandon: (action: Action) => void;
 }) {
   const icon = ACTION_ICONS[item.action.status];
   const coach = getCoach(item.coachId);
+  const canAbandon =
+    item.action.status === "in_progress" || item.action.status === "paused";
   return (
-    <View style={styles.itemRow}>
+    <Pressable
+      onLongPress={canAbandon ? () => onAbandon(item.action) : undefined}
+      delayLongPress={400}
+      style={({ pressed }) => [
+        styles.itemRow,
+        pressed && canAbandon && { opacity: 0.85 },
+      ]}
+    >
       <View style={styles.actionIconWrap}>
         <Ionicons name={icon.name} size={22} color={icon.color} />
       </View>
@@ -281,13 +319,16 @@ function ActionRow({
         </Text>
         <Text style={styles.time}>{formatTime(item.createdAt)}</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -356,11 +397,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xxl,
   },
-  dayHeader: {
+  sectionHeader: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  dayHeaderText: {
+  sectionHeaderText: {
     color: colors.textDim,
     fontSize: 11,
     fontWeight: "700",

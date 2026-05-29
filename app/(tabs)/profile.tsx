@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSession } from "@/state/session";
 import { getCoach } from "@/data/coaches";
+import { HomeButton } from "@/components/HomeButton";
 import { colors, radius, spacing } from "@/theme/colors";
 
 export default function ProfileScreen() {
@@ -14,7 +15,10 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.heading}>내 정보</Text>
+        <View style={styles.headingRow}>
+          <HomeButton />
+          <Text style={styles.heading}>내 정보</Text>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.label}>현재 코치</Text>
@@ -82,11 +86,16 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   container: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  headingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
   heading: {
     color: colors.text,
     fontSize: 28,
     fontWeight: "800",
-    marginBottom: spacing.lg,
   },
   card: {
     backgroundColor: colors.bgCard,

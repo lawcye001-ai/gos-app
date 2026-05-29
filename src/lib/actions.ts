@@ -1,7 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CoachId } from "@/data/coaches";
 
-export type ActionStatus = "pending" | "in_progress" | "done" | "abandoned";
+export type ActionStatus =
+  | "pending"
+  | "in_progress"
+  | "paused"
+  | "done"
+  | "abandoned";
 
 export type Action = {
   id: string;
@@ -13,6 +18,9 @@ export type Action = {
   startedAt?: number;
   durationMinutes?: number;
   completedAt?: number;
+  pausedAt?: number;
+  pausedTotalMs?: number;
+  goalId?: string;
 };
 
 const STORAGE_KEY = "gos.actions";
@@ -22,7 +30,16 @@ async function readAll(): Promise<Action[]> {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Action[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    const list = parsed as Action[];
+    // id 기준 dedupe(먼저 등장 유지). 과거 버그/레이스로 중복 저장된 행동 정리(records key 충돌 방지).
+    const seen = new Set<string>();
+    return list.filter((a) => {
+      if (!a || typeof a.id !== "string") return false;
+      if (seen.has(a.id)) return false;
+      seen.add(a.id);
+      return true;
+    });
   } catch {
     return [];
   }
@@ -76,6 +93,17 @@ export async function saveAction(input: SaveActionInput): Promise<Action> {
     }
   }
 
+  // 동일 coachId에 in_progress/paused 행동이 있으면 새 행동 생성 거부(동시 행동 1개 원칙).
+  // 버튼·LLM log_action·decision-card GO 공통 적용. 호출자가 catch해서 처리.
+  const active = all.find(
+    (a) =>
+      a.coachId === input.coachId &&
+      (a.status === "in_progress" || a.status === "paused"),
+  );
+  if (active) {
+    throw new Error("이미 진행 중인 행동이 있다");
+  }
+
   const created: Action = {
     id: input.id ?? generateId(),
     coachId: input.coachId,
@@ -87,6 +115,9 @@ export async function saveAction(input: SaveActionInput): Promise<Action> {
     startedAt: input.status === "in_progress" ? now : undefined,
     completedAt: input.status === "done" ? now : undefined,
   };
+  // 같은 id 재persist 무시(멱등) — messages.ts 패턴 동일.
+  const dup = all.find((a) => a.id === created.id);
+  if (dup) return dup;
   all.push(created);
   await writeAll(all);
   return created;
@@ -122,6 +153,47 @@ export async function updateActionStatus(
     completedAt:
       status === "done" && prev.completedAt === undefined ? now : prev.completedAt,
   };
+  all[idx] = updated;
+  await writeAll(all);
+  return updated;
+}
+
+export async function getActionById(id: string): Promise<Action | null> {
+  const all = await readAll();
+  return all.find((a) => a.id === id) ?? null;
+}
+
+// in_progress 또는 paused 중 가장 최근 1개. in_progress 우선. 둘 다 없으면 undefined.
+// 버튼(GO/HOLD/STOP) 핸들러가 "현재 대상 행동"을 잡는 데 사용.
+export async function getCurrentAction(
+  coachId: CoachId,
+): Promise<Action | undefined> {
+  const all = await readAll();
+  const candidates = all.filter(
+    (a) =>
+      a.coachId === coachId &&
+      (a.status === "in_progress" || a.status === "paused"),
+  );
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "in_progress" ? -1 : 1;
+    const aTs = a.startedAt ?? a.updatedAt;
+    const bTs = b.startedAt ?? b.updatedAt;
+    return bTs - aTs;
+  });
+  return candidates[0];
+}
+
+// 상태머신 헬퍼(timeCheck)용 부분 갱신. updatedAt은 항상 now로 덮어씀.
+// patch에 pausedAt: undefined를 주면 직렬화 시 필드 제거됨(재개 invariant).
+export async function patchAction(
+  id: string,
+  patch: Partial<Action>,
+): Promise<Action | null> {
+  const all = await readAll();
+  const idx = all.findIndex((a) => a.id === id);
+  if (idx < 0) return null;
+  const updated: Action = { ...all[idx], ...patch, updatedAt: Date.now() };
   all[idx] = updated;
   await writeAll(all);
   return updated;
